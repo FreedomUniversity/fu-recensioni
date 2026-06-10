@@ -1,0 +1,59 @@
+name: Recensioni tick
+# Ogni 10 min: detector + drip + poller. Stato in repo PRIVATO fu-recensioni-state (PII fuori dal pubblico).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  repository_dispatch:
+    types: [tick]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: recensioni-tick
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout stato (repo privato)
+        uses: actions/checkout@v4
+        with:
+          repository: FreedomUniversity/fu-recensioni-state
+          token: ${{ secrets.GH_PAT }}
+          path: _state
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: detector + drip + poller
+        env:
+          REC_STATE: ${{ github.workspace }}/_state/state
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+          PIPEDRIVE_TOKEN: ${{ secrets.PIPEDRIVE_TOKEN }}
+          TALLY_TOKEN: ${{ secrets.TALLY_TOKEN }}
+        run: |
+          python3 recensioni_detector.py
+          python3 recensioni_drip.py
+          python3 recensioni_trustpilot.py
+          python3 recensioni_inviti.py
+      - name: salva stato (repo privato)
+        if: always()
+        run: |
+          cd _state
+          git config user.name "fu-recensioni-bot"
+          git config user.email "bot@freedomuniversity.it"
+          git add -A
+          git commit -m "stato recensioni" || { echo "niente da committare"; exit 0; }
+          git pull --rebase --autostash || true
+          git push || echo "push fallito"
+      - name: Alert se il tick fallisce (mai silenzioso)
+        if: failure()
+        env:
+          SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+        run: |
+          curl -s -X POST -H "Authorization: Bearer $SLACK_FU_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            https://slack.com/api/chat.postMessage \
+            -d '{"channel":"U0A4ET9U56E","text":"🚨 *Recensioni — TICK FALLITO* sul cloud (detector/drip/poller). Controlla: https://github.com/FreedomUniversity/fu-recensioni/actions/workflows/tick.yml"}'

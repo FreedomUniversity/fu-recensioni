@@ -1,0 +1,35 @@
+name: Recensioni pulse
+# Lunedì 09:00 Europe/Rome (07:00 UTC): rilancio classifica su #general. Legge stato (repo privato).
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout stato (repo privato)
+        uses: actions/checkout@v4
+        with:
+          repository: FreedomUniversity/fu-recensioni-state
+          token: ${{ secrets.GH_PAT }}
+          path: _state
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: pulse settimanale
+        env:
+          REC_STATE: ${{ github.workspace }}/_state/state
+          SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+        run: python3 recensioni_pulse.py C0A4YSS19TP
+      - name: Alert se il pulse fallisce
+        if: failure()
+        env:
+          SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+        run: |
+          curl -s -X POST -H "Authorization: Bearer $SLACK_FU_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            https://slack.com/api/chat.postMessage \
+            -d '{"channel":"U0A4ET9U56E","text":"🚨 *Recensioni — PULSE FALLITO* (classifica lunedì non inviata). Controlla: https://github.com/FreedomUniversity/fu-recensioni/actions/workflows/pulse.yml"}'

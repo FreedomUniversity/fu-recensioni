@@ -1,0 +1,21 @@
+name: Recensioni guardiano 2
+# Gemello del guardiano 1, sfasato. Sorveglia tick + Make A/B + guardiano 1. Auto-ripara e avvisa.
+on:
+  schedule:
+    - cron: '22,52 * * * *'
+  repository_dispatch:
+    types: [guard]
+  workflow_dispatch: {}
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: guardiano 2
+        env:
+          SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          MAKE_TOKEN: ${{ secrets.MAKE_TOKEN }}
+        run: python3 recensioni_guardiano.py 2

@@ -1,0 +1,9 @@
+state/*.log
+state/trustpilot_emails_raw/
+__pycache__/
+*.pyc
+
+# stato/PII → vivono nel repo privato fu-recensioni-state
+state/
+drip_schedule.json
+_state/
