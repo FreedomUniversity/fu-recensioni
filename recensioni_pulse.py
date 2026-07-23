@@ -37,6 +37,49 @@ def post(channel):
         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json; charset=utf-8"})
     return json.load(urllib.request.urlopen(req)).get("ok")
 
+WEEK_MARK = os.path.join(rcfg.STATE, "pulse_last_week")
+
+def _week():
+    import datetime
+    return datetime.date.today().strftime("%G-W%V")
+
+def _gia_uscita():
+    try:
+        return open(WEEK_MARK).read().strip() == _week()
+    except Exception:
+        return False
+
+def _segna():
+    try:
+        open(WEEK_MARK, "w").write(_week())
+    except Exception:
+        pass
+
 if __name__ == "__main__":
+    # Modalità --auto: pensata per girare DENTRO il tick (ogni 10 min, trigger Make
+    # ridondante e affidabile) invece di dipendere dal cron GitHub, che è inaffidabile
+    # e ha già saltato lunedì 20/7/2026 lasciando il team senza classifica.
+    # Il marker settimanale rende impossibile il doppio invio anche se scatta pure il cron.
+    if "--auto" in sys.argv:
+        import datetime
+        os.environ.setdefault("TZ", "Europe/Rome")
+        try:
+            time_ok = datetime.datetime.now(
+                datetime.timezone(datetime.timedelta(hours=2)))  # Rome estate
+        except Exception:
+            time_ok = datetime.datetime.now()
+        if time_ok.weekday() != 0 or time_ok.hour < 9:
+            sys.exit(0)                      # non è lunedì mattina → zitto
+        if _gia_uscita():
+            sys.exit(0)                      # già uscita questa settimana → zitto
+        ok = post(GENERAL)
+        if ok:
+            _segna()
+        print("pulse auto inviato:", ok)
+        sys.exit(0)
+
     ch = sys.argv[1] if len(sys.argv) > 1 else DM_DOM
-    print("inviato:", post(ch))
+    ok = post(ch)
+    if ch == GENERAL and ok:
+        _segna()                             # anche via cron: marca la settimana
+    print("inviato:", ok)
