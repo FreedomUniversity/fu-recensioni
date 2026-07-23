@@ -193,8 +193,13 @@ def main():
             log(f"   ⚠ scartato record spazzatura: {nome!r} <{email}>"); continue
         if email in ledger:
             scartati["gia_invitati"] += 1; continue
+        # ATTRIBUZIONE: volutamente "Automatico", NON una persona.
+        # Questo invito nasce da una VENDITA, non da qualcuno che è andato a
+        # chiedere la recensione. Scriverlo come gettone di un collaboratore
+        # gonfierebbe la classifica del contest con recensioni non guadagnate.
+        # Il contest resta puro: conta solo il modulo Tally (chi si dà da fare).
         cand.append({"email": email, "nome": nome, "quando": quando,
-                     "chi": (o.get("assignedTo") or "Closer")})
+                     "chi": "Automatico (vendita)"})
 
     log(f"candidati NUOVI: {len(cand)}  | scartati: {scartati}")
     if not cand:

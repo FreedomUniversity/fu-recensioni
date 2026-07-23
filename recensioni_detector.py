@@ -144,7 +144,30 @@ def main():
     try:
         M=imaplib.IMAP4_SSL(cfg["IMAP_HOST"]); M.login(cfg["IMAP_USER"],cfg["IMAP_PASS"]); M.select("INBOX")
     except Exception as e:
-        log(f"IMAP login fallito: {e}"); return
+        # MAI PIU' IN SILENZIO. Questo errore ha reso il detector cieco dal 9/6 al 23/7
+        # (45 giorni: zero recensioni rilevate, zero feste, contatore fermo) e nessuno
+        # se n'e' accorto perche' qui si faceva solo log+return. Ora allerta.
+        # Freno anti-spam: massimo 1 avviso al giorno (il tick gira ogni 10 min).
+        log(f"IMAP login fallito: {e}")
+        try:
+            marker = os.path.join(rcfg.STATE, "imap_alert_last")
+            oggi = datetime.date.today().isoformat()
+            gia = open(marker).read().strip() if os.path.exists(marker) else ""
+            if gia != oggi:
+                open(marker, "w").write(oggi)
+                slack_dm(
+                    "🚨 *Recensioni — IL RILEVATORE È CIECO*\n"
+                    f"Non riesco a leggere la casella `{cfg.get('IMAP_USER','?')}`:\n"
+                    f"`{e}`\n\n"
+                    "Finché non si risolve: *nessuna recensione viene rilevata, "
+                    "nessuna festa parte, il contatore resta fermo.*\n"
+                    "👉 Fix: genera una nuova *password per le app* Google "
+                    "(myaccount.google.com → Sicurezza → Password per le app) e aggiornala "
+                    "nel segreto `IMAP_PASS` del repo `fu-recensioni`."
+                )
+        except Exception as e2:
+            log(f"alert IMAP fallito: {e2}")
+        return
     since=(datetime.date.today()-datetime.timedelta(days=SINCE_DAYS)).strftime("%d-%b-%Y")
     typ,data=M.search(None,f'(SINCE {since} FROM "trustpilot")')
     ids=data[0].split()
