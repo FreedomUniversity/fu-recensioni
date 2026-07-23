@@ -34,12 +34,17 @@ jobs:
           PIPEDRIVE_TOKEN: ${{ secrets.PIPEDRIVE_TOKEN }}
           TALLY_TOKEN: ${{ secrets.TALLY_TOKEN }}
           KLAVIYO_TOKEN: ${{ secrets.KLAVIYO_TOKEN }}
+          GHL_TOKEN_FU: ${{ secrets.GHL_TOKEN_FU }}
+          GHL_LOCATION_FU: ${{ secrets.GHL_LOCATION_FU }}
+          # DRY-RUN finché Domenico non mette 'SI' (poi diventa un secret/var)
+          GHL_WON_LIVE: ${{ vars.GHL_WON_LIVE }}
         run: |
           python3 recensioni_detector.py
           python3 recensioni_drip.py
           python3 recensioni_trustpilot.py
           python3 recensioni_inviti.py
           python3 klaviyo_subscribe.py
+          python3 ghl_won_source.py
       - name: salva stato (repo privato)
         if: always()
         run: |
