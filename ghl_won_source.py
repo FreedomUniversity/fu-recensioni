@@ -42,6 +42,7 @@ DRY-RUN DI DEFAULT: non manda nulla finché GHL_WON_LIVE=SI. Mostra cosa farebbe
 """
 import json, os, re, sys, time, datetime, urllib.request, urllib.parse
 import rcfg
+import invio
 
 # ----------------------------- CONFIG ---------------------------------------
 GHL_TOKEN    = rcfg.secret("GHL_TOKEN_FU",    "~/.config/ghl-token-fu-crm-new")
@@ -115,7 +116,7 @@ def _jsave(path, data):
 def fetch_won():
     """UNICO punto legato al CRM. Cambia CRM → si riscrive solo questa funzione."""
     if not (GHL_TOKEN and GHL_LOCATION):
-        log("✗ credenziali GHL mancanti"); return []
+        log("✗ credenziali GHL mancanti"); _alert_ghl_giu("credenziali GHL mancanti"); return []
     H = {"Authorization": f"Bearer {GHL_TOKEN}", "Version": "2021-07-28",
          "Accept": "application/json", "User-Agent": UA}   # UA obbligatorio: senza → 403
     out, sa, sid = [], None, None
@@ -127,7 +128,12 @@ def fetch_won():
         try:
             d = json.load(urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=40))
         except Exception as e:
-            log(f"✗ lettura GHL fallita: {e}"); break
+            # Morte silenziosa evitata: se GHL non risponde (token scaduto/403) le vendite
+            # smetterebbero di ricevere l'invito senza che nessuno lo sappia. Ora allerta.
+            log(f"✗ lettura GHL fallita: {e}")
+            if not out:
+                _alert_ghl_giu(str(e)[:100])
+            break
         opps = d.get("opportunities", [])
         if not opps:
             break
@@ -141,18 +147,43 @@ def fetch_won():
 
 # ------------------------------ CONSEGNA ------------------------------------
 def send_invite(email, nome):
-    """Invito ufficiale: Klaviyo porta il BCC AFS Trustpilot → recensione VERIFICATA."""
-    data = json.dumps({"Email": email, "Nome": nome or ""}).encode()
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(WEBHOOK_KLAVIYO, data=data,
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=25) as r:
-                if r.getcode() == 200:
-                    return True
-        except Exception:
-            time.sleep(3 + attempt * 3)
-    return False
+    """Invito con RIDONDANZA (piano A webhook → piano B Klaviyo diretto). Vedi invio.py.
+    Ritorna True se una qualsiasi via ha consegnato. Se ha salvato il piano B (Make giù),
+    lo segnala una volta al giorno: il primario va sistemato, ma l'invito è partito."""
+    ok, via = invio.manda_invito(email, nome)
+    if ok and via == "B":
+        log(f"   ⚠ invito via PIANO B (Klaviyo diretto): il webhook Make non risponde → {email}")
+        _alert_piano_b()
+    return ok
+
+def _alert_ghl_giu(motivo):
+    """Il canale Vendite (GHL) non risponde → nuove vendite non invitate. Alert 1/giorno."""
+    try:
+        marker = os.path.join(rcfg.STATE, "ghl_down_alert_last")
+        oggi = datetime.date.today().isoformat()
+        if (open(marker).read().strip() if os.path.exists(marker) else "") == oggi:
+            return
+        open(marker, "w").write(oggi)
+        slack("🔴 *Recensioni — canale Vendite (GHL) GIÙ*\n"
+              f"Non riesco a leggere le vendite da GoHighLevel: `{motivo}`\n"
+              "Finché non si risolve, i nuovi clienti da vendita NON ricevono l'invito. "
+              "Probabile token GHL scaduto → aggiorna il secret `GHL_TOKEN_FU`.")
+    except Exception as e:
+        log(f"alert GHL giù fallito: {e}")
+
+def _alert_piano_b():
+    """Avvisa Domenico UNA volta al giorno che il primario è giù (backup attivo)."""
+    try:
+        marker = os.path.join(rcfg.STATE, "planb_alert_last")
+        oggi = datetime.date.today().isoformat()
+        if (open(marker).read().strip() if os.path.exists(marker) else "") == oggi:
+            return
+        open(marker, "w").write(oggi)
+        slack("🟡 *Recensioni — via primaria giù, backup attivo*\n"
+              "Il webhook Make non risponde: gli inviti stanno partendo lo stesso via *piano B* "
+              "(Klaviyo diretto). Nessun invito perso. Da sistemare il webhook quando puoi.")
+    except Exception as e:
+        log(f"alert piano B fallito: {e}")
 
 def gettone(nome, email, chi):
     new = not os.path.exists(GETTONI)

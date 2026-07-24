@@ -20,6 +20,7 @@ Il budget 50/mese è condiviso col canale GHL (registro unico) → impossibile s
 import json, os, sys, time, urllib.request, urllib.parse, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcfg
+import invio
 
 LOG_PATH      = os.path.join(rcfg.STATE, "recensioni_trustpilot.log")
 TALLY_TOKEN   = rcfg.secret("TALLY_TOKEN", "~/.config/tally-token")
@@ -69,19 +70,22 @@ def slack(text):
         log(f"slack fallito: {e}")
 
 def send_invite(email, nome):
-    """Invito ufficiale: POST diretto → Klaviyo (BCC AFS Trustpilot) → recensione VERIFICATA.
-    Deterministico: 1 POST = 1 invito. Ritorna True se HTTP 200."""
-    data = json.dumps({"Email": email, "Nome": nome or ""}).encode()
-    for attempt in range(3):
+    """Invito con RIDONDANZA (piano A webhook → piano B Klaviyo diretto). Vedi invio.py.
+    Se ha salvato il piano B (Make giù) lo segnala una volta al giorno."""
+    ok, via = invio.manda_invito(email, nome)
+    if ok and via == "B":
+        log(f"   ⚠ invito via PIANO B (Klaviyo diretto): webhook Make giù → {email}")
         try:
-            req = urllib.request.Request(WEBHOOK_KLAVIYO, data=data,
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=25) as r:
-                if r.getcode() == 200:
-                    return True
+            marker = os.path.join(rcfg.STATE, "planb_alert_last")
+            oggi = datetime.date.today().isoformat()
+            if (open(marker).read().strip() if os.path.exists(marker) else "") != oggi:
+                open(marker, "w").write(oggi)
+                slack("🟡 *Recensioni — via primaria giù, backup attivo*\n"
+                      "Il webhook Make non risponde: gli inviti partono lo stesso via *piano B* "
+                      "(Klaviyo diretto). Nessun invito perso. Sistema il webhook quando puoi.")
         except Exception:
-            time.sleep(3 + attempt * 3)
-    return False
+            pass
+    return ok
 
 def tally_get(path):
     url = f"https://api.tally.so{path}"
