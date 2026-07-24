@@ -45,6 +45,22 @@ def build_digest():
         imap_ok = False
         degradi.append(f"rilevatore recensioni CIECO — IMAP: {str(e)[:80]} "
                        "(rigenera password app Google → segreto IMAP_PASS)")
+    # 1b) CONSEGNA: il Flow Klaviyo che manda l'invito è ancora vivo? Se qualcuno lo
+    #     mette in pausa/archivia, gli inviti smettono di partire in silenzio. Ora si vede.
+    consegna_ok = True
+    try:
+        ktok = rcfg.secret("KLAVIYO_TOKEN", "~/.config/klaviyo-token")
+        if ktok:
+            req = urllib.request.Request(
+                "https://a.klaviyo.com/api/flows/XiHYbD/",
+                headers={"Authorization": f"Klaviyo-API-Key {ktok}", "revision": "2024-10-15"})
+            st = json.load(urllib.request.urlopen(req, timeout=20)).get("data", {}).get("attributes", {}).get("status")
+            if st != "live":
+                consegna_ok = False
+                critici.append(f"Flow invito Klaviyo NON live (status={st}) → gli inviti non partono! Riattivalo su Klaviyo.")
+    except Exception as e:
+        consegna_ok = False
+        degradi.append(f"non riesco a verificare il Flow di consegna Klaviyo: {str(e)[:60]}")
     # 2) token Slack (critico) — se manca non arriva nemmeno questo digest
     if not TOKEN:
         critici.append("SLACK_FU_TOKEN mancante")
@@ -76,7 +92,7 @@ def build_digest():
     righe = [f"*Recensioni — {stato}* · {now}",
              f"Classifica *{tot}/50* · {lead}{inviti_line}",
              f"Email monitorate: {seen} · Drip da pubblicare: {drip_left} · "
-             f"IMAP: {'ok' if imap_ok else 'GIÙ'}"]
+             f"IMAP: {'ok' if imap_ok else 'GIÙ'} · Consegna: {'ok' if consegna_ok else 'GIÙ'}"]
     righe += [f"🚨 {p}" for p in critici]
     righe += [f"⚠️ {d}" for d in degradi]
     return "\n".join(righe)

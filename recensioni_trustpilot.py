@@ -33,9 +33,6 @@ MAX_BATCH     = int(os.environ.get("TALLY_MAX_BATCH", "20"))   # freno anti-bulk
 BUDGET_MESE   = int(os.environ.get("TRUSTPILOT_BUDGET", "50")) # tetto piano free
 DM_DOMENICO   = "U0A4ET9U56E"
 SLACK_TOKEN   = rcfg.secret("SLACK_FU_TOKEN", "~/.config/deus-user-token")
-# Webhook letto da segreto (hardcoded anche altrove + repo pubblico → da ruotare in Make).
-WEBHOOK_KLAVIYO = rcfg.secret("KLAVIYO_WEBHOOK",
-                              default="https://hook.eu2.make.com/85i7cv4duj4pr6f8qehducde2rsijg3u")
 
 def log(msg):
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -70,22 +67,23 @@ def slack(text):
         log(f"slack fallito: {e}")
 
 def send_invite(email, nome):
-    """Invito con RIDONDANZA (piano A webhook → piano B Klaviyo diretto). Vedi invio.py.
-    Se ha salvato il piano B (Make giù) lo segnala una volta al giorno."""
-    ok, via = invio.manda_invito(email, nome)
-    if ok and via == "B":
-        log(f"   ⚠ invito via PIANO B (Klaviyo diretto): webhook Make giù → {email}")
-        try:
-            marker = os.path.join(rcfg.STATE, "planb_alert_last")
-            oggi = datetime.date.today().isoformat()
-            if (open(marker).read().strip() if os.path.exists(marker) else "") != oggi:
-                open(marker, "w").write(oggi)
-                slack("🟡 *Recensioni — via primaria giù, backup attivo*\n"
-                      "Il webhook Make non risponde: gli inviti partono lo stesso via *piano B* "
-                      "(Klaviyo diretto). Nessun invito perso. Sistema il webhook quando puoi.")
-        except Exception:
-            pass
+    """Invito = iscrizione con consenso su Klaviyo (vedi invio.py). True se consegnato.
+    Se Klaviyo è giù ritorna False → il chiamante NON segna la richiesta come vista (riprova)."""
+    ok, _via = invio.manda_invito(email, nome)
     return ok
+
+def _alert_consegna_giu():
+    """Klaviyo non raggiungibile → richieste in coda (non perse). Alert 1/giorno."""
+    try:
+        marker = os.path.join(rcfg.STATE, "consegna_down_alert_last")
+        oggi = datetime.date.today().isoformat()
+        if (open(marker).read().strip() if os.path.exists(marker) else "") != oggi:
+            open(marker, "w").write(oggi)
+            slack("🟡 *Recensioni — consegna Klaviyo non raggiungibile*\n"
+                  "Le richieste dal modulo restano IN CODA e ripartono appena Klaviyo torna. "
+                  "Nessun invito perso.")
+    except Exception:
+        pass
 
 def tally_get(path):
     url = f"https://api.tally.so{path}"
@@ -180,7 +178,8 @@ def process_tally():
                 gettone_log(nome, email, collab)       # attribuzione contest
                 log(f"  ✓ TALLY {sid}: {nome} <{email}> | procurata da {collab} → invito inviato")
             else:
-                log(f"  ⚠ TALLY {sid}: {nome} <{email}> → invio FALLITO (webhook), riprovo al prossimo giro")
+                log(f"  ⏳ TALLY {sid}: {nome} <{email}> → IN CODA (Klaviyo non raggiungibile), riprovo al giro dopo")
+                _alert_consegna_giu()
                 continue                       # NON segno seen: ritenta
             time.sleep(SEND_GAP)
         except Exception as e:

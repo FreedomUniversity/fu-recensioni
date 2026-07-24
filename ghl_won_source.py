@@ -55,13 +55,7 @@ STAGE_VINTO     = "0196ea33-e030-4a98-9ff0-e806d2b11025"
 STAGE_VINTO_RATA= "510b753d-a51c-4972-8ac8-35b1c283b037"
 STAGES_ACQUISTO = {STAGE_VINTO, STAGE_VINTO_RATA}
 
-# Letta da segreto. NB: la stessa URL è hardcoded in recensioni_trustpilot.py e il repo
-# è PUBBLICO → è già esposta nella history. Fix definitivo = ruotare il webhook in Make
-# e tenere solo il segreto. Vedi nota in cima al README.
-WEBHOOK_KLAVIYO = rcfg.secret("KLAVIYO_WEBHOOK",
-                              default="https://hook.eu2.make.com/85i7cv4duj4pr6f8qehducde2rsijg3u")
-
-LIVE        = os.environ.get("GHL_WON_LIVE", "").strip().upper() == "SI"
+LIVE       = os.environ.get("GHL_WON_LIVE", "").strip().upper() == "SI"
 MAX_BATCH   = int(os.environ.get("GHL_WON_MAX_BATCH", "15"))   # freno anti-bulk
 BUDGET_MESE = int(os.environ.get("TRUSTPILOT_BUDGET", "50"))   # piano free
 SOGLIA_ALERT= int(os.environ.get("TRUSTPILOT_SOGLIA", "45"))
@@ -147,14 +141,24 @@ def fetch_won():
 
 # ------------------------------ CONSEGNA ------------------------------------
 def send_invite(email, nome):
-    """Invito con RIDONDANZA (piano A webhook → piano B Klaviyo diretto). Vedi invio.py.
-    Ritorna True se una qualsiasi via ha consegnato. Se ha salvato il piano B (Make giù),
-    lo segnala una volta al giorno: il primario va sistemato, ma l'invito è partito."""
-    ok, via = invio.manda_invito(email, nome)
-    if ok and via == "B":
-        log(f"   ⚠ invito via PIANO B (Klaviyo diretto): il webhook Make non risponde → {email}")
-        _alert_piano_b()
+    """Invito = iscrizione con consenso su Klaviyo (vedi invio.py). True se consegnato.
+    Se Klaviyo è giù ritorna False → il chiamante NON lo segna inviato (si ritenta)."""
+    ok, _via = invio.manda_invito(email, nome)
     return ok
+
+def _alert_consegna_giu():
+    """Klaviyo non raggiungibile → inviti in coda (non persi). Alert 1/giorno."""
+    try:
+        marker = os.path.join(rcfg.STATE, "consegna_down_alert_last")
+        oggi = datetime.date.today().isoformat()
+        if (open(marker).read().strip() if os.path.exists(marker) else "") == oggi:
+            return
+        open(marker, "w").write(oggi)
+        slack("🟡 *Recensioni — consegna Klaviyo non raggiungibile*\n"
+              "Gli inviti restano IN CODA e ripartono da soli appena Klaviyo torna. "
+              "Nessun invito perso. Se persiste, controlla lo stato di Klaviyo.")
+    except Exception as e:
+        log(f"alert consegna giù fallito: {e}")
 
 def _alert_ghl_giu(motivo):
     """Il canale Vendite (GHL) non risponde → nuove vendite non invitate. Alert 1/giorno."""
@@ -170,20 +174,6 @@ def _alert_ghl_giu(motivo):
               "Probabile token GHL scaduto → aggiorna il secret `GHL_TOKEN_FU`.")
     except Exception as e:
         log(f"alert GHL giù fallito: {e}")
-
-def _alert_piano_b():
-    """Avvisa Domenico UNA volta al giorno che il primario è giù (backup attivo)."""
-    try:
-        marker = os.path.join(rcfg.STATE, "planb_alert_last")
-        oggi = datetime.date.today().isoformat()
-        if (open(marker).read().strip() if os.path.exists(marker) else "") == oggi:
-            return
-        open(marker, "w").write(oggi)
-        slack("🟡 *Recensioni — via primaria giù, backup attivo*\n"
-              "Il webhook Make non risponde: gli inviti stanno partendo lo stesso via *piano B* "
-              "(Klaviyo diretto). Nessun invito perso. Da sistemare il webhook quando puoi.")
-    except Exception as e:
-        log(f"alert piano B fallito: {e}")
 
 def gettone(nome, email, chi):
     new = not os.path.exists(GETTONI)
@@ -268,7 +258,7 @@ def main():
         log(f"🔎 DRY-RUN: {len(cand)} inviti simulati. Per attivare: GHL_WON_LIVE=SI")
         return
 
-    ok = 0
+    ok = 0; falliti = 0
     for c in cand:
         if send_invite(c["email"], c["nome"]):
             rcfg.invite_record(c["email"], "ghl")   # registro unico, salvato SUBITO
@@ -276,8 +266,11 @@ def main():
             ok += 1
             log(f"   ✓ invito → {c['nome']} <{c['email']}>")
         else:
-            log(f"   ✗ invito FALLITO → {c['nome']} <{c['email']}>")
+            falliti += 1
+            log(f"   ⏳ IN CODA (Klaviyo non raggiungibile) → {c['nome']} <{c['email']}> (riprovo al giro dopo)")
         time.sleep(SEND_GAP)
+    if falliti:
+        _alert_consegna_giu()
 
     usati_ora = usati + ok
     log(f"✅ inviati {ok}/{len(cand)} | mese: {usati_ora}/{BUDGET_MESE}")

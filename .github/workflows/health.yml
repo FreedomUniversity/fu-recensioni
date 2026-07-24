@@ -26,5 +26,6 @@ jobs:
           IMAP_USER: ${{ secrets.IMAP_USER }}
           IMAP_PASS: ${{ secrets.IMAP_PASS }}
           SLACK_FU_TOKEN: ${{ secrets.SLACK_FU_TOKEN }}
+          KLAVIYO_TOKEN: ${{ secrets.KLAVIYO_TOKEN }}
           PIPEDRIVE_TOKEN: ${{ secrets.PIPEDRIVE_TOKEN }}
         run: python3 recensioni_health.py
