@@ -1,8 +1,8 @@
 name: Recensioni health
-# Heartbeat giornaliero (08:30 Europe/Rome = 06:30 UTC): digest nel DM Domenico. Legge stato (repo privato).
+# Digest ON-DEMAND (bottone "Run workflow"). Il digest AUTOMATICO giornaliero ora lo fa
+# il tick (recensioni_health.py --auto), che è affidabile (trigger Make ridondante) e
+# committa il marker giornaliero → un solo digest al giorno, niente dipendenza dal cron.
 on:
-  schedule:
-    - cron: '30 6 * * *'
   workflow_dispatch: {}
 permissions:
   contents: read

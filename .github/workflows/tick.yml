@@ -48,6 +48,8 @@ jobs:
           # classifica settimanale: non dipende piu' dal cron GitHub (inaffidabile,
           # ha saltato lun 20/7). Esce solo lunedi' >=09:00 Rome, una volta a settimana.
           python3 recensioni_pulse.py --auto
+          # digest salute giornaliero: idem, agganciato al tick (1 volta/giorno, mattina Rome)
+          python3 recensioni_health.py --auto
       - name: salva stato (repo privato)
         if: always()
         run: |

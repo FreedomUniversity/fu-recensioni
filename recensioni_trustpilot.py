@@ -1,34 +1,40 @@
 #!/usr/bin/env python3
-"""RECENSIONI TRUSTPILOT — poller (cloud). Due canali in ingresso, UN solo meccanismo
-d'uscita: l'automazione nativa Pipedrive (attività "Trustpilot" COMPLETATA → invito).
-  CANALE A — modulo Tally: nuove risposte → persona Pipedrive + attività "Trustpilot" spuntata.
-  CANALE B — campo persona "Invito Recensione = Da Inviare" (filtro 58883).
-Gli inviti li decide chi compila il Tally / flagga la persona: nessun invio di massa."""
+"""RECENSIONI TRUSTPILOT — poller modulo Tally (cloud). CANALE "team/contest".
+============================================================================
+Chi compila il modulo Tally (https://form.freedomuniversity.it/recensione) chiede
+un invito recensione per un cliente. Questo poller lo consegna.
+
+RIFONDAZIONE 24/7/2026 — CRM-INDIPENDENTE
+-----------------------------------------
+Prima l'invito partiva creando un'attività "Trustpilot" in Pipedrive e spuntandola,
+per far scattare l'automazione NATIVA Pipedrive → webhook. Due problemi:
+  1) Pipedrive è il CRM che si sta ABBANDONANDO (migrazione a GHL, 22/7): quel
+     percorso muore con lui.
+  2) L'automazione nativa soffre di throttling (saltava ~2/3 degli invii ravvicinati).
+Ora l'invito è un POST DIRETTO al webhook Klaviyo (deterministico, verificato:
+HTTP 200 + Make status 1), identico al motore GHL. Zero dipendenza dal CRM.
+
+Freni: dedup cross-canale (registro unico rcfg) · anti-bulk · email valida.
+Il budget 50/mese è condiviso col canale GHL (registro unico) → impossibile sforare.
+"""
 import json, os, sys, time, urllib.request, urllib.parse, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcfg
 
-PIPE_TOKEN = rcfg.secret("PIPEDRIVE_TOKEN", "~/.claude_pipedrive_creds", key="PIPEDRIVE_TOKEN")
-PIPE_BASE  = rcfg.PD_BASE
-
-QUEUE_FILTER_ID   = 58883
-FIELD_INVITO_KEY  = "04f26cb912dfc021f5a826ef717172039dcc57e5"
-OPT_DA_INVIARE    = 103
-OPT_INVIATO       = 104
-OPT_ERRORE        = 105
-ACTIVITY_SUBJECT  = "Trustpilot"
-ACTIVITY_TYPE     = "lunch"
-LOG_PATH          = os.path.join(rcfg.STATE, "recensioni_trustpilot.log")
-
+LOG_PATH      = os.path.join(rcfg.STATE, "recensioni_trustpilot.log")
 TALLY_TOKEN   = rcfg.secret("TALLY_TOKEN", "~/.config/tally-token")
 TALLY_FORM_ID = "WO1XyP"
 TALLY_UA      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
 SEEN_FILE     = os.path.join(rcfg.STATE, "tally_seen_recensioni.json")
 GETTONI_CSV   = os.path.join(rcfg.STATE, "recensioni_gettoni.csv")
-CLIENTE_KEY   = "70e2e34b03a182a9e358a51658d546bc9478f3fd"
-CLIENTE_SI    = 41
-PROCURATA_KEY = "b20c86b72f92ee5e9498e82bcd93f764ef405144"
-SEND_GAP      = 60
+SEND_GAP      = 8
+MAX_BATCH     = int(os.environ.get("TALLY_MAX_BATCH", "20"))   # freno anti-bulk
+BUDGET_MESE   = int(os.environ.get("TRUSTPILOT_BUDGET", "50")) # tetto piano free
+DM_DOMENICO   = "U0A4ET9U56E"
+SLACK_TOKEN   = rcfg.secret("SLACK_FU_TOKEN", "~/.config/deus-user-token")
+# Webhook letto da segreto (hardcoded anche altrove + repo pubblico → da ruotare in Make).
+WEBHOOK_KLAVIYO = rcfg.secret("KLAVIYO_WEBHOOK",
+                              default="https://hook.eu2.make.com/85i7cv4duj4pr6f8qehducde2rsijg3u")
 
 def log(msg):
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -50,31 +56,32 @@ def _get_json_retry(url, headers=None, tries=3, backoff=5):
                 time.sleep(backoff)
     raise last
 
-def pd_get(path, **params):
-    params["api_token"] = PIPE_TOKEN
-    url = f"{PIPE_BASE}{path}?{urllib.parse.urlencode(params)}"
-    return _get_json_retry(url)
+def slack(text):
+    if not SLACK_TOKEN:
+        return
+    try:
+        body = json.dumps({"channel": DM_DOMENICO, "text": text}).encode()
+        req = urllib.request.Request("https://slack.com/api/chat.postMessage", data=body,
+                                     headers={"Authorization": f"Bearer {SLACK_TOKEN}",
+                                              "Content-Type": "application/json; charset=utf-8"})
+        urllib.request.urlopen(req, timeout=20).read()
+    except Exception as e:
+        log(f"slack fallito: {e}")
 
-def pd_req(method, path, body):
-    url = f"{PIPE_BASE}{path}?{urllib.parse.urlencode({'api_token': PIPE_TOKEN})}"
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
-
-def first_email(person):
-    em = person.get("email")
-    if isinstance(em, list):
-        for e in em:
-            if e.get("value"):
-                return e["value"].strip()
-    elif isinstance(em, str) and em.strip():
-        return em.strip()
-    return None
-
-def set_invito(person_id, option_id):
-    pd_req("PUT", f"/persons/{person_id}", {FIELD_INVITO_KEY: option_id})
+def send_invite(email, nome):
+    """Invito ufficiale: POST diretto → Klaviyo (BCC AFS Trustpilot) → recensione VERIFICATA.
+    Deterministico: 1 POST = 1 invito. Ritorna True se HTTP 200."""
+    data = json.dumps({"Email": email, "Nome": nome or ""}).encode()
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(WEBHOOK_KLAVIYO, data=data,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=25) as r:
+                if r.getcode() == 200:
+                    return True
+        except Exception:
+            time.sleep(3 + attempt * 3)
+    return False
 
 def tally_get(path):
     url = f"https://api.tally.so{path}"
@@ -89,15 +96,6 @@ def _load_seen():
 
 def _save_seen(seen):
     json.dump(sorted(seen), open(SEEN_FILE, "w"))
-
-def upsert_person(name, email):
-    r = pd_get("/persons/search", term=email, fields="email", exact_match="true", limit=1)
-    items = (r.get("data") or {}).get("items") or []
-    if items:
-        return items[0]["item"]["id"]
-    r = pd_req("POST", "/persons", {"name": name or email,
-                                    "email": [{"value": email, "primary": True}]})
-    return r["data"]["id"]
 
 def gettone_log(nome, email, collaboratore):
     new = not os.path.exists(GETTONI_CSV)
@@ -129,12 +127,11 @@ def _answer_fields(resp, questions):
 
 def process_tally():
     if not TALLY_TOKEN:
-        return
+        log("TALLY_TOKEN mancante: canale Tally non attivo"); return
     try:
         data = tally_get(f"/forms/{TALLY_FORM_ID}/submissions?filter=completed")
     except Exception as e:
-        log(f"TALLY errore lettura: {e}")
-        return
+        log(f"TALLY errore lettura: {e}"); return
     subs = data.get("submissions") or []
     questions = data.get("questions") or []
     seen = _load_seen()
@@ -142,25 +139,49 @@ def process_tally():
     if not nuovi:
         return
     log(f"TALLY: {len(nuovi)} nuova/e richiesta/e")
+
+    # FRENO ANTI-BULK: il modulo è a bassa frequenza (umano). Un picco = errore/abuso.
+    # Segno comunque tutto come 'visto' per non ri-scatenarlo, ma NON invio: allerta e basta.
+    if len(nuovi) > MAX_BATCH:
+        for s in nuovi:
+            seen.add(s.get("id"))
+        _save_seen(seen)
+        log(f"🚨 TALLY ANTI-BULK: {len(nuovi)} richieste in un colpo (soglia {MAX_BATCH}) → STOP, 0 invii")
+        slack(f"🚨 *Recensioni — anti-bulk modulo Tally*\n"
+              f"Arrivate *{len(nuovi)}* richieste tutte insieme (soglia {MAX_BATCH}). "
+              f"Non ho inviato niente: sembra un errore o un import, non richieste vere.")
+        return
+
     for s in nuovi:
         sid = s.get("id")
         f = _answer_fields(s, questions)
-        nome = f["nome"]; email = f["email"]; collab = f["collab"] or "?"; note = f["note"]
-        if not email:
-            log(f"  ✗ TALLY {sid}: email mancante, skip"); seen.add(sid); _save_seen(seen); continue
+        nome = (f["nome"] or "").strip()
+        email = (f["email"] or "").strip().lower()
+        collab = f["collab"] or "?"
+        if not rcfg.valid_email(email):
+            log(f"  ✗ TALLY {sid}: email mancante/non valida ({email!r}), skip")
+            seen.add(sid); _save_seen(seen); continue
+        if rcfg.invite_seen(email):            # dedup cross-canale (Tally + GHL)
+            log(f"  ⏭ TALLY {sid}: {email} già invitata → skip (no doppioni)")
+            seen.add(sid); _save_seen(seen); continue
+        if rcfg.invites_this_month() >= BUDGET_MESE:
+            log(f"  ⛔ TALLY {sid}: tetto {BUDGET_MESE}/mese raggiunto → {email} resta in coda")
+            slack(f"🚨 *Recensioni — tetto mensile raggiunto* ({BUDGET_MESE}/{BUDGET_MESE}).\n"
+                  f"La richiesta di *{nome or email}* dal modulo aspetta il mese prossimo, "
+                  f"oppure fai l'upgrade del piano Trustpilot.")
+            break                              # NON segno seen: si riprova più avanti
         try:
-            pid = upsert_person(nome, email)
-            aid = pd_req("POST", "/activities", {
-                "subject": ACTIVITY_SUBJECT, "type": ACTIVITY_TYPE, "person_id": pid, "done": 0,
-                "note": f"Invito Trustpilot via modulo Tally. Procurata da: {collab}. {note}".strip()})["data"]["id"]
-            pd_req("PUT", f"/activities/{aid}", {"done": 1})
-            pd_req("PUT", f"/persons/{pid}", {FIELD_INVITO_KEY: OPT_INVIATO, CLIENTE_KEY: CLIENTE_SI,
-                                              PROCURATA_KEY: collab})
-            gettone_log(nome, email, collab)
-            log(f"  ✓ TALLY {sid}: {nome} <{email}> | procurata da {collab} → attività spuntata → automazione")
+            if send_invite(email, nome):
+                rcfg.invite_record(email, "tally")     # registro unico
+                gettone_log(nome, email, collab)       # attribuzione contest
+                log(f"  ✓ TALLY {sid}: {nome} <{email}> | procurata da {collab} → invito inviato")
+            else:
+                log(f"  ⚠ TALLY {sid}: {nome} <{email}> → invio FALLITO (webhook), riprovo al prossimo giro")
+                continue                       # NON segno seen: ritenta
             time.sleep(SEND_GAP)
         except Exception as e:
             log(f"  ✗ TALLY {sid}: {nome} <{email}> ERRORE → {e}")
+            continue                           # NON segno seen: ritenta
         seen.add(sid); _save_seen(seen)
 
 def main():
@@ -168,35 +189,6 @@ def main():
         process_tally()
     except Exception as e:
         log(f"process_tally crash: {e}")
-    try:
-        res = pd_get("/persons", filter_id=QUEUE_FILTER_ID, limit=100)
-    except Exception as e:
-        log(f"ERRORE lettura coda: {e}")
-        return
-    people = res.get("data") or []
-    if not people:
-        return
-    log(f"coda: {len(people)} persona/e da invitare")
-    for p in people:
-        pid, name = p["id"], p.get("name", "")
-        email = first_email(p)
-        if not email:
-            log(f"  ✗ {name} (id {pid}): nessuna email → Errore")
-            try: set_invito(pid, OPT_ERRORE)
-            except Exception as e: log(f"    update errore fallito: {e}")
-            continue
-        try:
-            aid = pd_req("POST", "/activities", {
-                "subject": ACTIVITY_SUBJECT, "type": ACTIVITY_TYPE, "person_id": pid, "done": 0,
-                "note": "Invito recensione Trustpilot (automatico, via automazione nativa)."})["data"]["id"]
-            pd_req("PUT", f"/activities/{aid}", {"done": 1})
-            set_invito(pid, OPT_INVIATO)
-            log(f"  ✓ {name} (id {pid}) <{email}> → attività Trustpilot spuntata → automazione attiva")
-            time.sleep(SEND_GAP)
-        except Exception as e:
-            log(f"  ✗ {name} (id {pid}) <{email}>: ERRORE invio → {e}")
-            try: set_invito(pid, OPT_ERRORE)
-            except Exception as e2: log(f"    update errore fallito: {e2}")
 
 if __name__ == "__main__":
     main()

@@ -66,8 +66,9 @@ BUDGET_MESE = int(os.environ.get("TRUSTPILOT_BUDGET", "50"))   # piano free
 SOGLIA_ALERT= int(os.environ.get("TRUSTPILOT_SOGLIA", "45"))
 SEND_GAP    = 8
 
-LEDGER    = os.path.join(rcfg.STATE, "ghl_invited.json")       # dedup a vita
 WATERMARK = os.path.join(rcfg.STATE, "ghl_watermark.json")     # da dove guardare avanti
+# NB: il dedup e il budget usano il REGISTRO UNICO in rcfg (invites_ledger.json),
+# condiviso con il canale Tally → una persona è invitata una volta sola da qualsiasi canale.
 GETTONI   = os.path.join(rcfg.STATE, "recensioni_gettoni.csv") # attribuzione contest
 LOGF      = os.path.join(rcfg.STATE, "ghl_won_source.log")
 
@@ -162,8 +163,7 @@ def gettone(nome, email, chi):
 
 # -------------------------------- MOTORE ------------------------------------
 def main():
-    ledger = _jload(LEDGER, {})                 # email -> data invito (dedup a vita)
-    wm     = _jload(WATERMARK, {})
+    wm = _jload(WATERMARK, {})
     inizio = wm.get("from")
     if not inizio:
         # PRIMA ACCENSIONE: si fissa il paletto a ORA e si guarda solo avanti.
@@ -191,7 +191,7 @@ def main():
         if JUNK_EMAIL.match(email) or JUNK_NAME.match(nome) or len(nome) < 2:
             scartati["spazzatura"] += 1
             log(f"   ⚠ scartato record spazzatura: {nome!r} <{email}>"); continue
-        if email in ledger:
+        if rcfg.invite_seen(email):            # dedup cross-canale (GHL + Tally)
             scartati["gia_invitati"] += 1; continue
         # ATTRIBUZIONE: volutamente "Automatico", NON una persona.
         # Questo invito nasce da una VENDITA, non da qualcuno che è andato a
@@ -215,9 +215,9 @@ def main():
         slack(msg)
         return
 
-    # --- FRENO 2: budget mensile (tetto piano Trustpilot) -------------------
+    # --- FRENO 2: budget mensile (tetto piano Trustpilot, registro UNICO) ----
     mese = datetime.date.today().strftime("%Y-%m")
-    usati = sum(1 for d in ledger.values() if str(d).startswith(mese))
+    usati = rcfg.invites_this_month()          # conta TUTTI i canali, non solo GHL
     spazio = BUDGET_MESE - usati
     log(f"budget mese {mese}: {usati}/{BUDGET_MESE} usati → spazio {spazio}")
     if spazio <= 0:
@@ -240,8 +240,7 @@ def main():
     ok = 0
     for c in cand:
         if send_invite(c["email"], c["nome"]):
-            ledger[c["email"]] = datetime.date.today().isoformat()
-            _jsave(LEDGER, ledger)          # salva SUBITO: se crasha, niente doppioni
+            rcfg.invite_record(c["email"], "ghl")   # registro unico, salvato SUBITO
             gettone(c["nome"], c["email"], c["chi"])
             ok += 1
             log(f"   ✓ invito → {c['nome']} <{c['email']}>")

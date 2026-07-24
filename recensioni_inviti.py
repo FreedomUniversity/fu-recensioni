@@ -1,35 +1,23 @@
 #!/usr/bin/env python3
 """GUARDIANO INVITI TRUSTPILOT — conta gli inviti del mese e avvisa prima del limite 50.
-Conteggio ESATTO: persone DISTINTE con un'attività "Trustpilot" completata nel mese
-(= 1 invito per destinatario, combacia col contatore Trustpilot). Quando ci si avvicina
-a 50 manda un alert nel DM Domenico (1 volta al giorno) per fare l'upgrade del piano."""
-import sys, os, json, urllib.request, urllib.parse, datetime
+Fonte UNICA: il registro inviti condiviso (rcfg.invites_this_month) alimentato da TUTTI
+i canali (GHL "Vinto" + modulo Tally). Prima si contavano le attività Pipedrive, ma con
+la migrazione a GHL quel conteggio era diventato parziale/fuorviante. Ora è coerente.
+Vicino a 50 → alert nel DM Domenico (1 volta al giorno) per l'upgrade del piano."""
+import sys, os, json, urllib.request, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcfg
 
-PT = rcfg.secret("PIPEDRIVE_TOKEN", "~/.claude_pipedrive_creds", key="PIPEDRIVE_TOKEN")
-PB = rcfg.PD_BASE
-SLACK = rcfg.secret("SLACK_FU_TOKEN", "~/.config/slack-fu-token")
+SLACK = rcfg.secret("SLACK_FU_TOKEN", "~/.config/deus-user-token")
 DM = "U0A4ET9U56E"
-FILTER = 10198          # filtro attività "Trustpilot"
 LIMIT  = 50             # limite piano free
 WARN   = 45             # soglia di allarme → upgrade
 LINK   = "https://businessapp.b2b.trustpilot.com/invitations/invitation-history"
 STATE_F = os.path.join(rcfg.STATE, "invite_alert.json")
 
 def count_inviti():
-    mese = datetime.date.today().strftime("%Y-%m")
-    persons = set(); start = 0
-    while True:
-        u = f"{PB}/activities?{urllib.parse.urlencode({'filter_id':FILTER,'limit':500,'start':start,'api_token':PT})}"
-        d = json.load(urllib.request.urlopen(u, timeout=30)); data = d.get("data") or []
-        for a in data:
-            if a.get("done") and (a.get("marked_as_done_time","") or "").startswith(mese):
-                persons.add(a.get("person_id"))
-        more = (d.get("additional_data") or {}).get("pagination", {})
-        if more.get("more_items_in_collection"): start = more.get("next_start"); continue
-        break
-    return mese, len(persons)
+    """Ritorna (mese, n) leggendo il registro unico. Stessa firma di prima."""
+    return datetime.date.today().strftime("%Y-%m"), rcfg.invites_this_month()
 
 def slack(text):
     urllib.request.urlopen(urllib.request.Request("https://slack.com/api/chat.postMessage",
