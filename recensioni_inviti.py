@@ -25,8 +25,6 @@ def slack(text):
         headers={"Authorization": f"Bearer {SLACK}", "Content-Type": "application/json; charset=utf-8"}), timeout=20)
 
 def main():
-    if not PT:
-        print("PIPEDRIVE_TOKEN mancante"); return
     mese, n = count_inviti()
     print(f"inviti {mese}: {n}/{LIMIT}")
     try: st = json.load(open(STATE_F))
