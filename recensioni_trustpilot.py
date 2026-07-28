@@ -67,10 +67,9 @@ def slack(text):
         log(f"slack fallito: {e}")
 
 def send_invite(email, nome):
-    """Invito = iscrizione con consenso su Klaviyo (vedi invio.py). True se consegnato.
-    Se Klaviyo è giù ritorna False → il chiamante NON segna la richiesta come vista (riprova)."""
-    ok, _via = invio.manda_invito(email, nome)
-    return ok
+    """Ritorna (ok, via). via: 'klaviyo'=consegnato · 'soppresso'=non consegnabile ·
+    None=Klaviyo giù (ritenta)."""
+    return invio.manda_invito(email, nome)
 
 def _alert_consegna_giu():
     """Klaviyo non raggiungibile → richieste in coda (non perse). Alert 1/giorno."""
@@ -173,10 +172,14 @@ def process_tally():
                   f"oppure fai l'upgrade del piano Trustpilot.")
             break                              # NON segno seen: si riprova più avanti
         try:
-            if send_invite(email, nome):
+            esito, via = send_invite(email, nome)
+            if esito:
                 rcfg.invite_record(email, "tally")     # registro unico
                 gettone_log(nome, email, collab)       # attribuzione contest
                 log(f"  ✓ TALLY {sid}: {nome} <{email}> | procurata da {collab} → invito inviato")
+            elif via == "soppresso":
+                log(f"  ⛔ TALLY {sid}: {email} indirizzo SOPPRESSO su Klaviyo → non consegnabile (segno visto, non ritento)")
+                # segno visto sotto per non ripetere all'infinito una richiesta non consegnabile
             else:
                 log(f"  ⏳ TALLY {sid}: {nome} <{email}> → IN CODA (Klaviyo non raggiungibile), riprovo al giro dopo")
                 _alert_consegna_giu()

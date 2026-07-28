@@ -141,10 +141,9 @@ def fetch_won():
 
 # ------------------------------ CONSEGNA ------------------------------------
 def send_invite(email, nome):
-    """Invito = iscrizione con consenso su Klaviyo (vedi invio.py). True se consegnato.
-    Se Klaviyo è giù ritorna False → il chiamante NON lo segna inviato (si ritenta)."""
-    ok, _via = invio.manda_invito(email, nome)
-    return ok
+    """Ritorna (ok, via). via: 'klaviyo'=consegnato · 'soppresso'=non consegnabile
+    (bounce/unsub, non ritentare) · None=Klaviyo giù (ritenta)."""
+    return invio.manda_invito(email, nome)
 
 def _alert_consegna_giu():
     """Klaviyo non raggiungibile → inviti in coda (non persi). Alert 1/giorno."""
@@ -260,11 +259,15 @@ def main():
 
     ok = 0; falliti = 0
     for c in cand:
-        if send_invite(c["email"], c["nome"]):
+        esito, via = send_invite(c["email"], c["nome"])
+        if esito:
             rcfg.invite_record(c["email"], "ghl")   # registro unico, salvato SUBITO
             gettone(c["nome"], c["email"], c["chi"])
             ok += 1
             log(f"   ✓ invito → {c['nome']} <{c['email']}>")
+        elif via == "soppresso":
+            rcfg.invite_record(c["email"], "soppresso")  # non consegnabile: non ritentare
+            log(f"   ⛔ NON CONSEGNABILE (indirizzo soppresso su Klaviyo) → {c['nome']} <{c['email']}>")
         else:
             falliti += 1
             log(f"   ⏳ IN CODA (Klaviyo non raggiungibile) → {c['nome']} <{c['email']}> (riprovo al giro dopo)")
