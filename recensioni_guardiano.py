@@ -19,7 +19,12 @@ SLACK = rcfg.secret("SLACK_FU_TOKEN", "~/.config/slack-fu-token")
 PAT   = rcfg.secret("GH_PAT", "~/.config/gh-pat")
 MAKE  = rcfg.secret("MAKE_TOKEN", "~/.config/make-token")
 UA    = "Mozilla/5.0 (Macintosh) Chrome/124.0 Safari/537.36"
-MAKE_TRIGGERS = [9346700, 9346829]
+# SOLO il trigger da 10 min. Il gemello 9346829 (RIDONDANTE 13min) è SPENTO DI PROPOSITO
+# (divoratore di crediti Make, sta in ~/scripts/.make_keep_off.json) e ogni 5 min l'ENFORCER
+# di error_monitor.py sul VPS lo ri-spegne: tenerlo qui creava un ping-pong infinito
+# (122 spegni/riaccendi dal 2/8/2026) con una notifica Slack a ogni giro. 7/8/2026.
+# La ridondanza resta: cron di tick.yml + risveglio del tick se fermo >40min (TICK_GAP).
+MAKE_TRIGGERS = [9346700]
 TICK_GAP  = 2400   # 40 min senza tick riuscito → risveglia
 GUARD_GAP = 5400   # 90 min senza l'altro guardiano → risveglia
 
