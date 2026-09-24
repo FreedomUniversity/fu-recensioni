@@ -76,12 +76,15 @@ def main():
     if go is not None and go > GUARD_GAP:
         try: gh_dispatch("guard"); heals.append(f"guardiano {OTHER} fermo da {int(go//60)}min → risvegliato")
         except Exception as e: issues.append(f"guardiano {OTHER} fermo, risveglio fallito: {e}")
-    # report (solo se serve: niente rumore quando tutto ok)
+    # Report SOLO sui problemi rimasti aperti.
+    # 24/9/2026 — questo guardiano gira due volte l'ora e annunciava ogni volta «guardiano 2 fermo
+    # da 122min → risvegliato», identico, all'infinito. Una riparazione RIUSCITA non è un allarme:
+    # è il mestiere del guardiano, va nel log del workflow. Si parla quando qualcosa NON si è
+    # potuto aggiustare — lì sì che serve una persona. Le riparazioni restano allegate al problema
+    # quando c'è, così si capisce cosa è già stato tentato.
     if issues:
         slack(f"🚨 *Guardiano {SELF}* — problemi:\n• " + "\n• ".join(issues) +
               (("\n🛠️ auto-fix: " + "; ".join(heals)) if heals else ""))
-    elif heals:
-        slack(f"🛠️ *Guardiano {SELF}* ha auto-riparato:\n• " + "\n• ".join(heals))
     print(f"guardiano {SELF}: issues={issues} heals={heals}")
 
 if __name__ == "__main__":

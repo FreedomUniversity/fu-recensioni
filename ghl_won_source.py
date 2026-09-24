@@ -84,8 +84,17 @@ def log(msg):
     except Exception:
         pass
 
-def slack(text):
+def slack(text, chiave=None):
+    """24/9/2026 — questo modulo gira ogni 10 minuti e il freno anti-bulk ripartiva ogni volta
+    dallo stesso identico quadro: 48 messaggi al giorno per ripetere «sono comparsi 48 nuovi
+    Vinto». Un allarme che si ripete identico non informa, insegna a non leggere. Con `chiave`
+    l'avviso si dà una volta e poi tace finché il quadro non CAMBIA (o passano 24h). Lo stato sta
+    in REC_STATE, il repo privato che i workflow committano: su GitHub Actions il disco muore,
+    quello no."""
     if not SLACK_TOKEN:
+        return
+    if chiave and rcfg.avviso_gia_detto(chiave, " ".join(text.split())):
+        log(f"avviso «{chiave}» già dato e nulla è cambiato → non lo ripeto")
         return
     try:
         body = json.dumps({"channel": DM_DOMENICO, "text": text}).encode()
@@ -232,7 +241,7 @@ def main():
                f"Non ho inviato NIENTE: sembra un import/migrazione, non vendite vere.\n"
                f"Se sono acquisti reali, alza `GHL_WON_MAX_BATCH`. Altrimenti ignora.")
         log(f"🚨 ANTI-BULK: {len(cand)} candidati > soglia {MAX_BATCH} → STOP, zero invii")
-        slack(msg)
+        slack(msg, chiave="anti_bulk")
         return
 
     # --- FRENO 2: budget mensile (tetto piano Trustpilot, registro UNICO) ----

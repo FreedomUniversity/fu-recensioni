@@ -83,3 +83,34 @@ def secret(env, file_path=None, key=None, default=None):
     return default
 
 PD_BASE = secret("PIPEDRIVE_API_BASE", default="https://freedomuniversity.pipedrive.com/api/v1")
+
+
+# ---------------------------------------------------------------------------
+# AVVISI RIPETUTI — 24/9/2026
+# Il tick gira ogni 10 minuti e ripeteva lo stesso identico allarme a ogni giro:
+# 48 messaggi al giorno per dire «sono comparsi 48 nuovi Vinto». Un allarme che si
+# ripete identico non informa, insegna a non leggere. Qui l'avviso si annuncia una
+# volta, poi tace finché la situazione non CAMBIA davvero (o passano `ore`).
+AVVISI = os.path.join(STATE, "avvisi_detti.json")
+
+def avviso_gia_detto(chiave, valore, ore=24):
+    """True se questo avviso è già stato dato con lo STESSO valore da meno di `ore`.
+    Se ritorna False registra il fatto che lo stai dando adesso."""
+    try:
+        d = json.load(open(AVVISI))
+    except Exception:
+        d = {}
+    ora = datetime.datetime.now().timestamp()
+    v = d.get(chiave)
+    if v and str(v.get("valore")) == str(valore) and ora - v.get("ts", 0) < ore * 3600:
+        return True
+    d[chiave] = {"ts": ora, "valore": str(valore)}
+    d = {k: x for k, x in d.items() if ora - x.get("ts", 0) < 30 * 86400}
+    try:
+        os.makedirs(STATE, exist_ok=True)
+        tmp = AVVISI + ".tmp"
+        json.dump(d, open(tmp, "w"), indent=1, ensure_ascii=False)
+        os.replace(tmp, AVVISI)
+    except Exception:
+        pass
+    return False
