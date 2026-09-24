@@ -57,6 +57,10 @@ STAGES_ACQUISTO = {STAGE_VINTO, STAGE_VINTO_RATA}
 
 LIVE       = os.environ.get("GHL_WON_LIVE", "").strip().upper() == "SI"
 MAX_BATCH   = int(os.environ.get("GHL_WON_MAX_BATCH", "15"))   # freno anti-bulk
+# La valvola: quando l'arretrato supera MAX_BATCH ma è fatto di vendite vere sparse nel tempo,
+# non si blocca tutto — si rilascia a rate, dai più vecchi.
+RILASCIO_GIORNO = int(os.environ.get("GHL_WON_RILASCIO_GIORNO", "8"))
+GIORNI_SOSPETTO = int(os.environ.get("GHL_WON_GIORNI_SOSPETTO", "2"))  # ≤ questi giorni = import
 BUDGET_MESE = int(os.environ.get("TRUSTPILOT_BUDGET", "50"))   # piano free
 SOGLIA_ALERT= int(os.environ.get("TRUSTPILOT_SOGLIA", "45"))
 SEND_GAP    = 8
@@ -234,15 +238,43 @@ def main():
     if not cand:
         return
 
-    # --- FRENO 1: anti-bulk (il salvavita contro migrazioni/import) ----------
+    # --- FRENO 1: anti-bulk → non più un MURO, una VALVOLA ------------------
     if len(cand) > MAX_BATCH:
-        msg = (f"🚨 *Recensioni — FRENO ANTI-BULK SCATTATO*\n"
-               f"Sono comparsi *{len(cand)} nuovi 'Vinto'* in un colpo solo (soglia {MAX_BATCH}).\n"
-               f"Non ho inviato NIENTE: sembra un import/migrazione, non vendite vere.\n"
-               f"Se sono acquisti reali, alza `GHL_WON_MAX_BATCH`. Altrimenti ignora.")
-        log(f"🚨 ANTI-BULK: {len(cand)} candidati > soglia {MAX_BATCH} → STOP, zero invii")
-        slack(msg, chiave="anti_bulk")
+        giorni = sorted({c["quando"][:10] for c in cand if c.get("quando")})
+        if len(giorni) <= GIORNI_SOSPETTO:
+            # Tutti gli acquisti nello stesso giorno o due: è la firma di un import/migrazione
+            # (il 12/7/2026 ne arrivarono 390 in una volta). Qui il muro resta un muro.
+            msg = (f"🚨 *Recensioni — FRENO ANTI-BULK SCATTATO*\n"
+                   f"Sono comparsi *{len(cand)} nuovi 'Vinto'* concentrati in {len(giorni)} giorno/i "
+                   f"({', '.join(giorni)}): sembra un import/migrazione, non vendite vere.\n"
+                   f"Non ho inviato NIENTE. Se sono acquisti reali, alza `GHL_WON_MAX_BATCH`.")
+            log(f"🚨 ANTI-BULK (import sospetto): {len(cand)} candidati in {len(giorni)} giorni → STOP")
+            slack(msg, chiave="anti_bulk")
+            return
+        # Acquisti SPARSI nel tempo = vendite vere accumulate. Il vecchio freno le bloccava tutte,
+        # per sempre: più tempo passava, più candidati c'erano, più il muro restava chiuso. Uno
+        # stallo perfetto — 24/9/2026: 48 clienti veri, su 32 giorni diversi, fermi da luglio
+        # senza mai ricevere l'invito. Adesso si apre una valvola: i più vecchi per primi,
+        # qualche invito al giorno, e il tappo si smaltisce da solo.
+        restanti = len(cand)
+        cand = sorted(cand, key=lambda x: x["quando"])[:RILASCIO_GIORNO]
+        log(f"🚰 VALVOLA: {restanti} candidati sparsi su {len(giorni)} giorni (non è un import) "
+            f"→ rilascio i {len(cand)} più vecchi")
+        slack(f"🚰 *Recensioni — smaltisco l'arretrato*\n"
+              f"*{restanti} clienti* hanno comprato e non hanno mai ricevuto l'invito "
+              f"(acquisti sparsi su {len(giorni)} giorni diversi: vendite vere, non un import).\n"
+              f"Ne mando *{RILASCIO_GIORNO} al giorno* dai più vecchi — finiti in "
+              f"~{max(1, -(-restanti // RILASCIO_GIORNO))} giorni. Nessuno resta indietro.",
+              chiave="valvola_arretrato")
+
+    # la valvola vale anche sul giorno: se oggi ne sono già partiti abbastanza, si aspetta domani
+    gia_oggi = rcfg.invites_today()
+    if gia_oggi >= RILASCIO_GIORNO:
+        log(f"valvola: oggi sono già partiti {gia_oggi} inviti (tetto {RILASCIO_GIORNO}/giorno) → basta")
         return
+    if len(cand) > RILASCIO_GIORNO - gia_oggi:
+        cand = sorted(cand, key=lambda x: x["quando"])[:RILASCIO_GIORNO - gia_oggi]
+        log(f"valvola: ne restano {RILASCIO_GIORNO - gia_oggi} per oggi")
 
     # --- FRENO 2: budget mensile (tetto piano Trustpilot, registro UNICO) ----
     mese = datetime.date.today().strftime("%Y-%m")

@@ -114,3 +114,10 @@ def avviso_gia_detto(chiave, valore, ore=24):
     except Exception:
         pass
     return False
+
+
+def invites_today():
+    """Quanti inviti sono partiti OGGI, da qualsiasi canale. Serve alla valvola di rilascio:
+    un arretrato si smaltisce a rate, non in un colpo solo."""
+    oggi = datetime.date.today().isoformat()
+    return sum(1 for v in _ledger_load().values() if str(v.get("date", "")) == oggi)
