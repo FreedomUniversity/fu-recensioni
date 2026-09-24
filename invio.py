@@ -104,11 +104,20 @@ def manda_invito(email, nome=""):
     if not ok:
         return False, None                      # Klaviyo giu' -> in coda, mai perso
     # 3) recupera il pid se era un profilo nuovo (creato ora dall'iscrizione)
+    #
+    # 24/9/2026 — qui c'era UN'ATTESA SOLA di 6 secondi, e il profilo appena iscritto spesso non
+    # era ancora visibile: l'invito tornava indietro come «Klaviyo non raggiungibile» e finiva in
+    # coda. Al primo giro vero del motore sono usciti 3 inviti su 8 per questo, non perché Klaviyo
+    # fosse giù. L'iscrizione è ASINCRONA: non si indovina quanto ci mette, si aspetta finché
+    # compare (con attese crescenti) e solo alla fine ci si arrende.
     if pid is None:
-        time.sleep(6)                           # il job d'iscrizione è async
-        pid, _ = _profilo(email)
+        for attesa in (4, 6, 8, 12, 15):
+            time.sleep(attesa)
+            pid, _ = _profilo(email)
+            if pid is not None:
+                break
         if pid is None:
-            return False, None                  # non ancora visibile -> si ritenta
+            return False, "lento"               # non ancora visibile -> si ritenta al giro dopo
     # 4) FORZA il trigger: rimuovi + ri-aggiungi -> "Added to List" fresco -> Flow
     _lista(pid, "DELETE"); time.sleep(2)
     _lista(pid, "POST")

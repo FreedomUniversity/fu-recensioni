@@ -309,6 +309,10 @@ def main():
         elif via == "soppresso":
             rcfg.invite_record(c["email"], "soppresso")  # non consegnabile: non ritentare
             log(f"   ⛔ NON CONSEGNABILE (indirizzo soppresso su Klaviyo) → {c['nome']} <{c['email']}>")
+        elif via == "lento":
+            # il profilo è stato creato ma Klaviyo non lo mostra ancora: non è un guasto,
+            # è latenza. Si riprende al giro dopo senza gridare che la consegna è giù.
+            log(f"   ⏳ profilo ancora non visibile su Klaviyo → {c['nome']} <{c['email']}> (riprovo al giro dopo)")
         else:
             falliti += 1
             log(f"   ⏳ IN CODA (Klaviyo non raggiungibile) → {c['nome']} <{c['email']}> (riprovo al giro dopo)")
