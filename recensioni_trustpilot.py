@@ -11,8 +11,9 @@ per far scattare l'automazione NATIVA Pipedrive → webhook. Due problemi:
   1) Pipedrive è il CRM che si sta ABBANDONANDO (migrazione a GHL, 22/7): quel
      percorso muore con lui.
   2) L'automazione nativa soffre di throttling (saltava ~2/3 degli invii ravvicinati).
-Ora l'invito è un POST DIRETTO al webhook Klaviyo (deterministico, verificato:
-HTTP 200 + Make status 1), identico al motore GHL. Zero dipendenza dal CRM.
+Ora l'invito lo manda GHL: una mail al cliente con Trustpilot in BCC (AFS) →
+Trustpilot spedisce il SUO invito ufficiale → recensione VERIFICATA. Dal 19/10/2026
+Klaviyo è fuori: non lo usiamo più, e il suo "riuscito" mentiva a flow spento.
 
 Freni: dedup cross-canale (registro unico rcfg) · anti-bulk · email valida.
 Il budget 50/mese è condiviso col canale GHL (registro unico) → impossibile sforare.
@@ -67,19 +68,19 @@ def slack(text):
         log(f"slack fallito: {e}")
 
 def send_invite(email, nome):
-    """Ritorna (ok, via). via: 'klaviyo'=consegnato · 'soppresso'=non consegnabile ·
-    None=Klaviyo giù (ritenta)."""
+    """Ritorna (ok, via). via: 'ghl'=consegnato · 'soppresso'=non consegnabile ·
+    None=GHL non raggiungibile (resta in coda, si ritenta)."""
     return invio.manda_invito(email, nome)
 
 def _alert_consegna_giu():
-    """Klaviyo non raggiungibile → richieste in coda (non perse). Alert 1/giorno."""
+    """GHL non raggiungibile → richieste in coda (non perse). Alert 1/giorno."""
     try:
         marker = os.path.join(rcfg.STATE, "consegna_down_alert_last")
         oggi = datetime.date.today().isoformat()
         if (open(marker).read().strip() if os.path.exists(marker) else "") != oggi:
             open(marker, "w").write(oggi)
-            slack("🟡 *Recensioni — consegna Klaviyo non raggiungibile*\n"
-                  "Le richieste dal modulo restano IN CODA e ripartono appena Klaviyo torna. "
+            slack("🟡 *Recensioni — consegna GHL non raggiungibile*\n"
+                  "Le richieste dal modulo restano IN CODA e ripartono appena GHL torna. "
                   "Nessun invito perso.")
     except Exception:
         pass
@@ -178,10 +179,10 @@ def process_tally():
                 gettone_log(nome, email, collab)       # attribuzione contest
                 log(f"  ✓ TALLY {sid}: {nome} <{email}> | procurata da {collab} → invito inviato")
             elif via == "soppresso":
-                log(f"  ⛔ TALLY {sid}: {email} indirizzo SOPPRESSO su Klaviyo → non consegnabile (segno visto, non ritento)")
+                log(f"  ⛔ TALLY {sid}: {email} indirizzo NON CONSEGNABILE (rifiutato da GHL o in DND) → non consegnabile (segno visto, non ritento)")
                 # segno visto sotto per non ripetere all'infinito una richiesta non consegnabile
             else:
-                log(f"  ⏳ TALLY {sid}: {nome} <{email}> → IN CODA (Klaviyo non raggiungibile), riprovo al giro dopo")
+                log(f"  ⏳ TALLY {sid}: {nome} <{email}> → IN CODA (GHL non raggiungibile), riprovo al giro dopo")
                 _alert_consegna_giu()
                 continue                       # NON segno seen: ritenta
             time.sleep(SEND_GAP)

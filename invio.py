@@ -1,48 +1,82 @@
 #!/usr/bin/env python3
 """
-INVIO INVITO RECENSIONE — consegna affidabile e onesta
-======================================================
-Verità (24-28/7/2026): Klaviyo manda l'invito SOLO se il profilo (1) ha CONSENSO e
-(2) NON e' soppresso, e SOLO se il Flow riceve un evento "Added to List". Un semplice
-add-to-list, o un 202 dell'API, NON garantiscono la consegna.
+INVIO INVITO RECENSIONE — via GHL, con Trustpilot in BCC
+========================================================
+COME NASCE UNA RECENSIONE "VERIFICATA" (l'unica cosa che conta davvero)
+-----------------------------------------------------------------------
+Non è il link che rende verificata una recensione: è DA DOVE il cliente ci arriva.
+Si manda al cliente una mail normale mettendo in **BCC l'indirizzo AFS** di
+Trustpilot. Trustpilot legge quella copia e manda LUI il suo invito ufficiale.
+Il cliente recensisce da QUELLA mail → ✅ VERIFICATA.
+Se invece gli mandi il link su WhatsApp o in una mail qualsiasi, la recensione esce
+"spontanea": vale molto meno e non ha la spunta.
 
-SEQUENZA AFFIDABILE (la stessa che ha consegnato 83 recensioni, in klaviyo_subscribe):
-  1. ISCRIVI l'email con consenso SUBSCRIBED nella lista TnYVNH (3 retry).
-  2. Leggi il profilo: se e' SOPPRESSO (bounce/unsubscribe reale) -> NON consegnabile,
-     ritorna (False,"soppresso"): onesto, non lo conto come inviato.
-  3. FORZA il trigger: rimuovi dalla lista + ri-aggiungi -> evento "Added to List"
-     fresco -> il Flow XiHYbD parte e manda l'invito verificato (BCC AFS Trustpilot).
+PERCHE' GHL E NON PIU' KLAVIYO (19/10/2026)
+--------------------------------------------
+Fino a oggi la mail col BCC la mandava un flow Klaviyo (`XiHYbD`, lista TnYVNH).
+Klaviyo non si usa più. E non era nemmeno un buon posto dove stare:
+  • il flow era `disabled` dal 15/10 e l'API di Klaviyo NON ha un metodo per
+    riportare "live" il messaggio dentro un flow → la catena restava in ostaggio
+    di un clic nell'interfaccia che nessuno sapeva di dover fare;
+  • peggio: un `add to list` tornava "riuscito" anche a flow spento. L'invito
+    risultava mandato, il registro lo marcava PER SEMPRE (il dedup vale a vita) e
+    la mail non partiva. Un "200 che mente" che bruciava la richiesta in silenzio.
+GHL è il CRM che usiamo davvero, l'invio è una chiamata sola, e dopo si può
+rileggere lo stato REALE della mail (consegnata/aperta), non "accodata da qualche
+parte". Provato il 19/10 con un invio vero: `status: opened`, `bcc` presente nel
+record, provider mailgun, mittente info@freedomuniversity.it.
 
-Se Klaviyo e' irraggiungibile -> (False,None): invito IN CODA, mai falso "inviato",
-si ritenta (e klaviyo_subscribe.py fa da backstop). Klaviyo e' dipendenza dura: il
-Flow verificato vive li'.
-
-manda_invito(email, nome) -> (ok, via: "klaviyo" | "soppresso" | None)
+manda_invito(email, nome) -> (ok, via: "ghl" | "soppresso" | None)
+  (False, None) → GHL non raggiungibile: invito IN CODA, si ritenta. Mai un falso
+                  "inviato": è esattamente quello che bruciava le richieste.
 """
-import json, os, time, urllib.request, urllib.error, urllib.parse
+import json, os, re, urllib.request, urllib.error, urllib.parse
 import rcfg
 
-KTOK    = rcfg.secret("KLAVIYO_TOKEN", "~/.config/klaviyo-token")
-LIST_ID = rcfg.secret("KLAVIYO_LIST", default="TnYVNH")
-_FORCE_FAIL = os.environ.get("KLAVIYO_FORCE_FAIL") == "1"   # test: forza "in coda"
+GHL_TOKEN    = rcfg.secret("GHL_TOKEN_FU",    "~/.config/ghl-token-fu-crm-new")
+GHL_LOCATION = rcfg.secret("GHL_LOCATION_FU", "~/.config/ghl-location-fu")
+
+# L'indirizzo AFS di Trustpilot per freedomuniversity.it. E' LA CHIAVE della
+# recensione verificata: senza questo BCC parte una mail qualunque e la recensione
+# esce "spontanea". Non si cambia senza rifare il giro dentro Trustpilot.
+BCC_AFS = os.environ.get("TRUSTPILOT_AFS_BCC",
+                         "freedomuniversity.it+fd0960a0f4@invite.trustpilot.com")
+
+BASE = "https://services.leadconnectorhq.com"
+UA   = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "Chrome/124.0 Safari/537.36")
+EMAIL_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
+
+_FORCE_FAIL = os.environ.get("GHL_FORCE_FAIL") == "1"   # test: forza "in coda"
+
+OGGETTO = "Com'e' andata con Freedom University?"
 
 
-def _kheaders():
-    return {"Authorization": f"Klaviyo-API-Key {KTOK}", "revision": "2024-10-15",
-            "content-type": "application/json", "accept": "application/json"}
+def _corpo(nome):
+    saluto = f"Ciao {nome.split()[0]}," if (nome or "").strip() else "Ciao,"
+    return (f"<p>{saluto}</p>"
+            "<p>una cosa veloce: ci lasceresti due righe su com'e' andata con "
+            "Freedom University?</p>"
+            "<p>Ti arriva fra poco una mail da Trustpilot con il link: bastano "
+            "30 secondi e per noi vale tantissimo.</p>"
+            "<p>Grazie!<br>Il team Freedom University</p>")
 
 
-def _req(url, data=None, method="GET", timeout=25):
-    """Ritorna sempre (code, dict/bytes) senza sollevare su errore HTTP."""
+def _headers(version):
+    return {"Authorization": f"Bearer {GHL_TOKEN}", "Version": version,
+            "Content-Type": "application/json", "Accept": "application/json",
+            "User-Agent": UA}
+
+
+def _req(url, data=None, method="GET", version="2021-07-28", timeout=30):
+    """Ritorna sempre (code, dict). Non solleva su errore HTTP: un invito non si
+    perde per un 4xx, o si rimette in coda o si dichiara non consegnabile."""
     body = json.dumps(data).encode() if data is not None else None
-    req = urllib.request.Request(url, data=body, headers=_kheaders(), method=method)
+    req = urllib.request.Request(url, data=body, headers=_headers(version), method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()
-            try:
-                return r.getcode(), json.loads(raw or b"{}")
-            except Exception:
-                return r.getcode(), {}
+            return r.getcode(), (json.loads(raw) if raw else {})
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read() or b"{}")
@@ -52,73 +86,66 @@ def _req(url, data=None, method="GET", timeout=25):
         return 0, {}
 
 
-def _iscrivi(email):
-    """Iscrive con consenso SUBSCRIBED + aggiunge alla lista. 202 = accettato."""
-    body = {"data": {"type": "profile-subscription-bulk-create-job", "attributes": {
-                "custom_source": "Richiesta recensione FU",
-                "profiles": {"data": [{"type": "profile", "attributes": {
-                    "email": email,
-                    "subscriptions": {"email": {"marketing": {"consent": "SUBSCRIBED"}}}}}]}},
-            "relationships": {"list": {"data": {"type": "list", "id": LIST_ID}}}}}
-    code, _ = _req("https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/", body, "POST")
-    return code == 202
+def _trova_o_crea_contatto(email, nome):
+    """(contact_id, dnd) — oppure (None, None) se GHL non risponde."""
+    code, d = _req(f"{BASE}/contacts/?locationId={GHL_LOCATION}"
+                   f"&query={urllib.parse.quote(email)}&limit=5")
+    if code == 0:
+        return None, None
+    for c in (d.get("contacts") or []):
+        if (c.get("email") or "").strip().lower() == email.lower():
+            return c.get("id"), bool(c.get("dnd"))
+    # Non c'è: lo creo. In GHL una mail viaggia dentro una conversazione, quindi
+    # senza contatto non c'è niente a cui attaccarla.
+    parti = (nome or "").strip().split()
+    code, d = _req(f"{BASE}/contacts/upsert",
+                   {"locationId": GHL_LOCATION, "email": email,
+                    "firstName": parti[0] if parti else "",
+                    "lastName": " ".join(parti[1:]) if len(parti) > 1 else "",
+                    "source": "Richiesta recensione Trustpilot"}, "POST")
+    if code in (200, 201):
+        c = d.get("contact") or {}
+        return c.get("id"), bool(c.get("dnd"))
+    return None, None
 
 
-def _profilo(email):
-    """(pid, soppresso). soppresso=True SOLO se c'e' un record di soppressione reale
-    (bounce/unsubscribe), non per semplice consenso non-ancora-applicato (async)."""
-    q = urllib.parse.urlencode({"filter": f'equals(email,"{email}")',
-                                "additional-fields[profile]": "subscriptions"})
-    code, d = _req(f"https://a.klaviyo.com/api/profiles/?{q}")
-    data = (d.get("data") or [])
-    if not data:
-        return None, False
-    a = data[0]
-    pid = a.get("id")
-    mk = ((a.get("attributes", {}) or {}).get("subscriptions", {}) or {}).get("email", {}).get("marketing", {}) or {}
-    soppr = bool(mk.get("suppression") or mk.get("suppressions"))
-    return pid, soppr
-
-
-def _lista(pid, method):
-    code, _ = _req(f"https://a.klaviyo.com/api/lists/{LIST_ID}/relationships/profiles/",
-                   {"data": [{"type": "profile", "id": pid}]}, method)
-    return code in (200, 201, 204)
+def stato_email(email_message_id):
+    """Stato REALE della mail (delivered/opened/bounced...). Serve a non spacciare
+    un 201 'accodata' per una consegna: il 201 dice solo che GHL l'ha presa."""
+    code, d = _req(f"{BASE}/conversations/messages/email/{email_message_id}",
+                   version="2021-04-15")
+    return (d.get("emailMessage") or {}).get("status") if code == 200 else None
 
 
 def manda_invito(email, nome=""):
-    if _FORCE_FAIL or not KTOK or not email:
-        return False, None
-    # 1) PRIMA controlla la soppressione: se il profilo esiste già ed è soppresso
-    #    (bounce o disiscrizione reale) NON lo ri-iscriviamo (rispetto della scelta +
-    #    tutela deliverability). Onesto: non consegnabile.
-    pid, soppresso = _profilo(email)
-    if soppresso:
-        return False, "soppresso"
-    # 2) iscrivi con consenso (retry sui blip di rete)
-    ok = False
-    for attempt in range(3):
-        if _iscrivi(email):
-            ok = True; break
-        time.sleep(3 + attempt * 4)
-    if not ok:
-        return False, None                      # Klaviyo giu' -> in coda, mai perso
-    # 3) recupera il pid se era un profilo nuovo (creato ora dall'iscrizione)
-    #
-    # 24/9/2026 — qui c'era UN'ATTESA SOLA di 6 secondi, e il profilo appena iscritto spesso non
-    # era ancora visibile: l'invito tornava indietro come «Klaviyo non raggiungibile» e finiva in
-    # coda. Al primo giro vero del motore sono usciti 3 inviti su 8 per questo, non perché Klaviyo
-    # fosse giù. L'iscrizione è ASINCRONA: non si indovina quanto ci mette, si aspetta finché
-    # compare (con attese crescenti) e solo alla fine ci si arrende.
-    if pid is None:
-        for attesa in (4, 6, 8, 12, 15):
-            time.sleep(attesa)
-            pid, _ = _profilo(email)
-            if pid is not None:
-                break
-        if pid is None:
-            return False, "lento"               # non ancora visibile -> si ritenta al giro dopo
-    # 4) FORZA il trigger: rimuovi + ri-aggiungi -> "Added to List" fresco -> Flow
-    _lista(pid, "DELETE"); time.sleep(2)
-    _lista(pid, "POST")
-    return True, "klaviyo"
+    """Mail al cliente con Trustpilot in BCC → invito ufficiale → ✅ verificata."""
+    email = (email or "").strip()
+    if not EMAIL_OK.match(email):
+        return False, "soppresso"          # indirizzo non valido: mai consegnabile
+    if _FORCE_FAIL or not GHL_TOKEN or not GHL_LOCATION:
+        return False, None                 # in coda, si ritenta
+
+    cid, dnd = _trova_o_crea_contatto(email, nome)
+    if cid is None:
+        return False, None                 # GHL giù → coda, nessun falso "inviato"
+    if dnd:
+        return False, "soppresso"          # ha chiesto di non essere contattato
+
+    code, d = _req(f"{BASE}/conversations/messages",
+                   {"type": "Email", "contactId": cid, "subject": OGGETTO,
+                    "emailBcc": [BCC_AFS], "html": _corpo(nome)},
+                   "POST", version="2021-04-15", timeout=45)
+    if code in (200, 201) and d.get("emailMessageId"):
+        return True, "ghl"
+    if code in (400, 422):
+        return False, "soppresso"          # GHL rifiuta l'indirizzo
+    return False, None                     # tutto il resto → coda, si ritenta
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        print("uso: invio.py <email> [nome]   — manda un invito VERO")
+        raise SystemExit(2)
+    ok, via = manda_invito(sys.argv[1], " ".join(sys.argv[2:]))
+    print(f"ok={ok} via={via}")

@@ -43,7 +43,10 @@ jobs:
           python3 recensioni_drip.py
           python3 recensioni_trustpilot.py
           python3 recensioni_inviti.py
-          python3 klaviyo_subscribe.py
+          # klaviyo_subscribe.py RIMOSSO il 19/10/2026: Klaviyo non si usa piu'.
+          # Iscriveva alla lista TnYVNH chiunque non avesse consenso e rinnescava il
+          # flow: con l'invio passato a GHL non ha piu' niente da fare, e toccare un
+          # vendor che non usiamo e' solo un modo per farlo ripartire per sbaglio.
           # ghl_won_source.py RIMOSSO dal giro il 19/10/2026: pescava da solo i "Vinto"
           # da GHL e mandava 8 inviti/giorno non richiesti. Gli inviti passano dal Tally.
           # classifica settimanale: non dipende piu' dal cron GitHub (inaffidabile,
