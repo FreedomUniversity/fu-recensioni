@@ -37,23 +37,42 @@ def post(channel):
         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json; charset=utf-8"})
     return json.load(urllib.request.urlopen(req)).get("ok")
 
-WEEK_MARK = os.path.join(rcfg.STATE, "pulse_last_week")
+# ANTI-DOPPIONE — due marker, non uno (19/10/2026)
+# Il 19/10 la classifica è uscita 24 VOLTE in un giorno. Non per un bug del pulse: il
+# marker viveva SOLO nello stato git, l'esecutore (il VPS) non riusciva più a pusharlo
+# ("detached HEAD") e ogni run ripartiva con `git reset --hard origin/main`, che spazzava
+# via il marker appena scritto. Scriveva il promemoria e lo buttava a ogni giro.
+# Lezione: un anti-doppione che vive in uno stato condiviso vale solo quanto la SCRITTURA
+# di quello stato. Qui il secondo marker sta FUORI dal clone, in ~/.config: non lo tocca
+# nessun reset e non dipende da nessun push. Basta che UNO dei due dica "già uscita".
+WEEK_MARKS = [os.path.join(rcfg.STATE, "pulse_last_week"),
+              os.path.expanduser("~/.config/recensioni_pulse_last_week")]
 
 def _week():
     import datetime
     return datetime.date.today().strftime("%G-W%V")
 
+def finestra_ok(now):
+    """Lunedì 09:00–10:59 ora di Roma. Funzione pura: si prova senza rete e senza
+    aspettare lunedì — era proprio la parte che nessuno aveva mai messo alla prova."""
+    return now.weekday() == 0 and 9 <= now.hour < 11
+
 def _gia_uscita():
-    try:
-        return open(WEEK_MARK).read().strip() == _week()
-    except Exception:
-        return False
+    for p in WEEK_MARKS:
+        try:
+            if open(p).read().strip() == _week():
+                return True
+        except Exception:
+            continue
+    return False
 
 def _segna():
-    try:
-        open(WEEK_MARK, "w").write(_week())
-    except Exception:
-        pass
+    for p in WEEK_MARKS:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "w").write(_week())
+        except Exception:
+            continue
 
 if __name__ == "__main__":
     # Modalità --auto: pensata per girare DENTRO il tick (ogni 10 min, trigger Make
@@ -62,13 +81,18 @@ if __name__ == "__main__":
     # Il marker settimanale rende impossibile il doppio invio anche se scatta pure il cron.
     if "--auto" in sys.argv:
         import datetime
-        os.environ.setdefault("TZ", "Europe/Rome")
+        # Ora di Roma VERA: il +2 fisso di prima è l'ora legale, e dal 25/10 (ora solare)
+        # avrebbe spostato la finestra di un'ora senza che nessuno se ne accorgesse.
         try:
-            time_ok = datetime.datetime.now(
-                datetime.timezone(datetime.timedelta(hours=2)))  # Rome estate
+            from zoneinfo import ZoneInfo
+            time_ok = datetime.datetime.now(ZoneInfo("Europe/Rome"))
         except Exception:
-            time_ok = datetime.datetime.now()
-        if time_ok.weekday() != 0 or time_ok.hour < 9:
+            time_ok = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=1)))
+        # FINESTRA CHIUSA, non solo "dopo le 9": prima bastava `hour < 9` e il pulse
+        # poteva uscire a QUALSIASI ora del lunedì. Con i marker saltati, il 19/10 ha
+        # sparato dalle 9:02 alle 15:06. Due ore di finestra bastano al suo scopo
+        # (classifica del lunedì mattina) e limitano il danno se i marker saltano ancora.
+        if not finestra_ok(time_ok):
             sys.exit(0)                      # non è lunedì mattina → zitto
         if _gia_uscita():
             sys.exit(0)                      # già uscita questa settimana → zitto
