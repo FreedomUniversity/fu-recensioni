@@ -44,6 +44,29 @@ import json, os, re, sys, time, datetime, urllib.request, urllib.parse
 import rcfg
 import invio
 
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  CANALE GHL → TRUSTPILOT: CHIUSO IL 19/10/2026. NON SPENTO — CHIUSO.      ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Questo canale pescava da solo le opportunità in stage "Vinto" da GHL e mandava
+# fino a 8 inviti recensione AL GIORNO senza che nessuno li avesse chiesti:
+# 86 inviti dal 24/9 al 15/10/2026, recessi e insoddisfatti compresi. Da lì
+# arrivavano le recensioni negative.
+#
+# PERCHE' UN `raise` E NON UNA VARIABILE A "NO".
+# Fino a stamattina il freno era `GHL_WON_LIVE`: una variabile d'ambiente che
+# chiunque — o uno script, o un redeploy — rimette su "SI" in tre secondi, senza
+# che nessuno se ne accorga. Un interruttore che si può riarmare per sbaglio non
+# è un freno, è un promemoria. E questo canale aveva 8 persone IN CANNA che
+# sarebbero partite al primo riarmo.
+# Gli inviti ora si chiedono dal modulo Tally, dove una PERSONA decide, scrive la
+# mail del cliente e ci mette il proprio nome. Il canale automatico non serve.
+#
+# PER RIAPRIRLO servirebbe una decisione esplicita di Domenico e la rimozione di
+# queste righe: non basta più toccare una variabile da fuori.
+print("⛔ canale GHL→Trustpilot CHIUSO il 19/10/2026 "
+      "— gli inviti si chiedono dal modulo Tally (https://form.freedomuniversity.it/recensione)")
+raise SystemExit(0)
+
 # ----------------------------- CONFIG ---------------------------------------
 GHL_TOKEN    = rcfg.secret("GHL_TOKEN_FU",    "~/.config/ghl-token-fu-crm-new")
 GHL_LOCATION = rcfg.secret("GHL_LOCATION_FU", "~/.config/ghl-location-fu")
