@@ -1,9 +1,32 @@
 #!/usr/bin/env python3
 """Config condivisa del sistema Recensioni — funziona in cloud (env) e in locale (file).
 Lo STATO (csv, seen, gettoni) vive in ./state nel repo e viene committato dai workflow."""
-import os, json, re, datetime
+import os, sys, json, re, datetime
 
 ROOT  = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------
+# FRENO A MANO UNIVERSALE (19/10/2026) — viaggia COL CODICE, non col singolo host
+# ---------------------------------------------------------------------------
+# Il 19/10 il sistema è stato spento su 5 livelli (Actions, Make, Klaviyo, variabili, Mac)
+# e si è riacceso lo stesso: il fallback sul VPS vedeva il cloud fermo, non sapeva che era
+# fermo DI PROPOSITO, e ha ripreso il testimone per 6 ore e mezza — 23 classifiche su
+# #general e l'intero tick rieseguito. «Spento apposta» e «giù» sono indistinguibili
+# dall'esterno, e un freno messo su UN host non copre i suoi gemelli.
+#
+# Questo freno sta in rcfg, che TUTTI e 13 gli script del sistema importano: un solo punto
+# di spegnimento per cloud, Mac, VPS, esecuzioni a mano e gemelli non ancora scoperti.
+# Vive nel repo, quindi sopravvive a un redeploy e arriva da solo a ogni clone che fa fetch.
+#
+# PER RIACCENDERE: cancellare il file SPENTO dal repo (e i due locali, se presenti).
+_FRENI = [os.path.join(ROOT, "SPENTO"),
+          os.path.expanduser("~/.config/recensioni-SPENTO")]
+_freno = next((p for p in _FRENI if os.path.exists(p)), None)
+if os.environ.get("RECENSIONI_SPENTO") == "1" or _freno:
+    sys.stderr.write(f"⛔ RECENSIONI FERME — freno a mano attivo ({_freno or 'env RECENSIONI_SPENTO=1'}). "
+                     f"Nessuno script di questo sistema esegue nulla.\n")
+    sys.exit(0)
+
 STATE = os.environ.get("REC_STATE", os.path.join(ROOT, "state"))
 os.makedirs(STATE, exist_ok=True)
 

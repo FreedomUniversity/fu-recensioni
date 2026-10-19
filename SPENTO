@@ -1,0 +1,27 @@
+FRENO A MANO — sistema Recensioni Trustpilot SPENTO
+====================================================
+Data: 19/10/2026 · Deciso da: Domenico.
+
+PERCHE'
+Gli inviti recensione partivano da soli (trigger "Vinto" in CRM + tempo), anche a clienti
+insoddisfatti e a chi aveva fatto recesso: 86 inviti indiscriminati dal 24/9 al 15/10.
+La decisione e': gli inviti si mandano SOLO a mano, scelti uno per uno.
+
+Il 19/10 il sistema e' stato spento su 5 livelli (GitHub Actions, Make, Klaviyo, variabile
+GHL_WON_LIVE, Mac) e si e' riacceso lo stesso: il fallback sul VPS 167.233.38.48 vedeva il
+cloud fermo, non sapeva che era fermo DI PROPOSITO, e ha ripreso il testimone per 6 ore e
+mezza — 23 classifiche su #general e l'intero tick rieseguito.
+Da fuori, "spento apposta" e "giu'" sono identici. Serviva un freno che viaggiasse COL
+CODICE invece che host per host: e' questo file.
+
+COME FUNZIONA
+Finche' questo file esiste nel repo, rcfg.py ferma OGNI script del sistema (tutti e 13 lo
+importano) — in cloud, sul Mac, sul VPS, lanciato a mano, e su qualunque gemello non ancora
+scoperto. Arriva da solo a ogni clone che fa fetch, e sopravvive a un redeploy.
+
+PER RIACCENDERE
+1. Cancellare questo file dal repo (git rm SPENTO && push).
+2. Cancellare, se presenti, ~/.config/recensioni-SPENTO sul Mac e su /root del VPS.
+3. Riabilitare cio' che si vuole davvero riaccendere, UNO PER UNO: i 5 workflow Actions,
+   il cron /etc/cron.d/fu-recensioni-fallback sul VPS, gli scenari Make, il flow Klaviyo.
+   Non riaccendere GHL_WON_LIVE senza una decisione esplicita di Domenico.
