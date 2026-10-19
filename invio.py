@@ -36,11 +36,12 @@ import rcfg
 GHL_TOKEN    = rcfg.secret("GHL_TOKEN_FU",    "~/.config/ghl-token-fu-crm-new")
 GHL_LOCATION = rcfg.secret("GHL_LOCATION_FU", "~/.config/ghl-location-fu")
 
-# L'indirizzo AFS di Trustpilot per freedomuniversity.it. E' LA CHIAVE della
-# recensione verificata: senza questo BCC parte una mail qualunque e la recensione
-# esce "spontanea". Non si cambia senza rifare il giro dentro Trustpilot.
-BCC_AFS = os.environ.get("TRUSTPILOT_AFS_BCC",
-                         "freedomuniversity.it+fd0960a0f4@invite.trustpilot.com")
+# L'indirizzo AFS di Trustpilot. E' LA CHIAVE della recensione verificata: senza
+# questo BCC parte una mail qualunque e la recensione esce "spontanea".
+# ⚠️ NON si scrive qui dentro: QUESTO REPO E' PUBBLICO. Chi conosce l'indirizzo AFS
+# puo' far spedire inviti a nome di Freedom University a chiunque voglia. Sta in un
+# segreto: `TRUSTPILOT_AFS_BCC` nelle Actions, `~/.config/trustpilot-afs-bcc` in locale.
+BCC_AFS = rcfg.secret("TRUSTPILOT_AFS_BCC", "~/.config/trustpilot-afs-bcc")
 
 BASE = "https://services.leadconnectorhq.com"
 UA   = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -122,6 +123,11 @@ def manda_invito(email, nome=""):
     email = (email or "").strip()
     if not EMAIL_OK.match(email):
         return False, "soppresso"          # indirizzo non valido: mai consegnabile
+    if not BCC_AFS:
+        # Senza il BCC la mail partirebbe comunque, ma la recensione sarebbe
+        # "spontanea": meglio non mandare niente che bruciare la richiesta (il
+        # dedup la marcherebbe a vita) per una recensione che non vale.
+        return False, None
     if _FORCE_FAIL or not GHL_TOKEN or not GHL_LOCATION:
         return False, None                 # in coda, si ritenta
 

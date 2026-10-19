@@ -9,6 +9,19 @@ import os, sys, json, time, urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rcfg
 
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  KLAVIYO FUORI DAL GIRO DAL 19/10/2026 — questo script non fa più nulla.  ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+# Serviva a dare il consenso ai profili della lista TnYVNH e a rinnescare il flow
+# Klaviyo che mandava l'invito. Dal 19/10 l'invito lo manda GHL (`invio.py`), con
+# Trustpilot in BCC: la lista Klaviyo non la alimenta più nessuno e il flow è in
+# draft. Tenerlo vivo significherebbe toccare ogni 10 minuti un vendor dismesso —
+# e dare a qualcuno la possibilità di far ripartire la vecchia catena per sbaglio.
+# Non l'ho cancellato perché le scorte su Mac e VPS lo chiamano ancora per nome:
+# uno script che non c'è fa fallire il giro, uno che esce pulito no.
+print("⛔ klaviyo_subscribe: Klaviyo è fuori dal giro dal 19/10/2026 — l'invito lo manda GHL")
+raise SystemExit(0)
+
 KL   = rcfg.secret("KLAVIYO_TOKEN", "~/.config/klaviyo-token")
 LIST = "TnYVNH"                       # lista TRUSTPILOT
 BASE = "https://a.klaviyo.com"
