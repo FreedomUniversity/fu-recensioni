@@ -4,7 +4,10 @@ a vicenda + sorvegliano il tick + auto-riparano. Read-only sullo stato: NON comm
 Cosa fa ad ogni giro:
   1. il TICK ha girato di recente? se no → ri-dispatcha 'tick' (risveglio) + alert
   2. i trigger Make A/B sono attivi? se no → li riattiva (Make API) + alert
-  3. l'ALTRO guardiano ha girato di recente? se no → ri-dispatcha 'guard' (lo risveglia) + alert
+  3. l'ALTRO guardiano ha girato di recente? se no → ri-dispatcha 'guard<altro>' (lo risveglia) + alert
+Un risveglio parte SOLO se il bersaglio non ha già un run in volo (in_volo), e l'evento è
+intestato al gemello ('guard1'/'guard2'): con l'evento generico 'guard' li triggerava
+entrambi e un risveglio ne generava due a ogni giro — 33.188 run il 30/10/2026.
 Usa GH_PAT (i dispatch via GITHUB_TOKEN non triggerano altri workflow) e MAKE_TOKEN."""
 import sys, os, json, urllib.request, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,6 +44,10 @@ def slack(t):
     urllib.request.urlopen(urllib.request.Request("https://slack.com/api/chat.postMessage",
         data=json.dumps({"channel": DM, "text": t}).encode(),
         headers={"Authorization": f"Bearer {SLACK}", "Content-Type": "application/json; charset=utf-8"}), timeout=20)
+def eta(s):
+    """«16666666min» è il sentinella 10**9, non una misura: in un alert sembra un bug.
+    Si dice quello che si sa davvero — nessun successo nella finestra guardata. 30/10/2026."""
+    return "senza NESSUN successo negli ultimi 20 run" if s >= 10**8 else f"fermo da {int(s//60)}min"
 def age(iso):
     dt = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
     return (datetime.datetime.now(timezone.utc) - dt).total_seconds()
@@ -72,10 +79,10 @@ def main():
     g = last_success_age("tick.yml")
     if g is not None and g > TICK_GAP:
         if in_volo("tick.yml"):
-            issues.append(f"tick senza successi da {int(g//60)}min ma un run è GIÀ in volo: non lo risveglio, serve un occhio umano")
+            issues.append(f"tick {eta(g)} ma un run è GIÀ in volo: non lo risveglio, serve un occhio umano")
         else:
-            try: gh_dispatch("tick"); heals.append(f"tick fermo da {int(g//60)}min → risvegliato")
-            except Exception as e: issues.append(f"tick fermo da {int(g//60)}min, dispatch fallito: {e}")
+            try: gh_dispatch("tick"); heals.append(f"tick {eta(g)} → risvegliato")
+            except Exception as e: issues.append(f"tick {eta(g)}, dispatch fallito: {e}")
     # 2) Make A/B attivi?
     for sid in MAKE_TRIGGERS:
         try:
@@ -92,11 +99,11 @@ def main():
     go = last_success_age(f"guardiano{OTHER}.yml")
     if go is not None and go > GUARD_GAP:
         if in_volo(f"guardiano{OTHER}.yml"):
-            issues.append(f"guardiano {OTHER} senza successi da {int(go//60)}min ma ha un run in volo: non lo risveglio")
+            issues.append(f"guardiano {OTHER} {eta(go)} ma ha un run in volo: non lo risveglio")
         else:
             # 'guard{OTHER}', non 'guard': l'evento generico lo ascoltavano entrambi e il
             # risveglio si raddoppiava a ogni giro. Un gemello risveglia SOLO l'altro.
-            try: gh_dispatch(f"guard{OTHER}"); heals.append(f"guardiano {OTHER} fermo da {int(go//60)}min → risvegliato")
+            try: gh_dispatch(f"guard{OTHER}"); heals.append(f"guardiano {OTHER} {eta(go)} → risvegliato")
             except Exception as e: issues.append(f"guardiano {OTHER} fermo, risveglio fallito: {e}")
     # Report SOLO sui problemi rimasti aperti.
     # 24/9/2026 — questo guardiano gira due volte l'ora e annunciava ogni volta «guardiano 2 fermo
