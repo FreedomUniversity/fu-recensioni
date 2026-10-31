@@ -51,14 +51,31 @@ def last_success_age(workflow):
         return min(age(t) for t in oks) if oks else 10**9
     except Exception:
         return None
+def in_volo(workflow):
+    """C'è già un run in coda o in corso per questo workflow? Allora NON si risveglia.
+    30/10/2026 — senza questo controllo il guardiano risvegliava un workflow che stava
+    già partendo: la coda si allungava a ogni giro e i run fallivano per rate limit,
+    il che azzerava i 'success' e rendeva la condizione di risveglio vera per sempre.
+    Il fallimento alimentava la causa del fallimento."""
+    try:
+        for st in ("queued", "in_progress"):
+            r = gh(f"/repos/{REPO}/actions/workflows/{workflow}/runs?status={st}&per_page=1")
+            if r.get("total_count", 0) > 0:
+                return True
+        return False
+    except Exception:
+        return True   # in dubbio NON risveglio: il danno del silenzio è un alert, quello della valanga è 33.188 run
 
 def main():
     issues = []; heals = []
     # 1) TICK vivo?
     g = last_success_age("tick.yml")
     if g is not None and g > TICK_GAP:
-        try: gh_dispatch("tick"); heals.append(f"tick fermo da {int(g//60)}min → risvegliato")
-        except Exception as e: issues.append(f"tick fermo da {int(g//60)}min, dispatch fallito: {e}")
+        if in_volo("tick.yml"):
+            issues.append(f"tick senza successi da {int(g//60)}min ma un run è GIÀ in volo: non lo risveglio, serve un occhio umano")
+        else:
+            try: gh_dispatch("tick"); heals.append(f"tick fermo da {int(g//60)}min → risvegliato")
+            except Exception as e: issues.append(f"tick fermo da {int(g//60)}min, dispatch fallito: {e}")
     # 2) Make A/B attivi?
     for sid in MAKE_TRIGGERS:
         try:
@@ -74,8 +91,13 @@ def main():
     # 3) l'ALTRO guardiano è vivo?
     go = last_success_age(f"guardiano{OTHER}.yml")
     if go is not None and go > GUARD_GAP:
-        try: gh_dispatch("guard"); heals.append(f"guardiano {OTHER} fermo da {int(go//60)}min → risvegliato")
-        except Exception as e: issues.append(f"guardiano {OTHER} fermo, risveglio fallito: {e}")
+        if in_volo(f"guardiano{OTHER}.yml"):
+            issues.append(f"guardiano {OTHER} senza successi da {int(go//60)}min ma ha un run in volo: non lo risveglio")
+        else:
+            # 'guard{OTHER}', non 'guard': l'evento generico lo ascoltavano entrambi e il
+            # risveglio si raddoppiava a ogni giro. Un gemello risveglia SOLO l'altro.
+            try: gh_dispatch(f"guard{OTHER}"); heals.append(f"guardiano {OTHER} fermo da {int(go//60)}min → risvegliato")
+            except Exception as e: issues.append(f"guardiano {OTHER} fermo, risveglio fallito: {e}")
     # Report SOLO sui problemi rimasti aperti.
     # 24/9/2026 — questo guardiano gira due volte l'ora e annunciava ogni volta «guardiano 2 fermo
     # da 122min → risvegliato», identico, all'infinito. Una riparazione RIUSCITA non è un allarme:

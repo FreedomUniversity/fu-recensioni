@@ -3,9 +3,17 @@ name: Recensioni guardiano 1
 on:
   schedule:
     - cron: '7,37 * * * *'
+  # 30/10/2026 — era 'guard', e 'guard' lo ascoltavano TUTTI E DUE i guardiani: un solo
+  # risveglio ne lanciava 2, ognuno ne lanciava altri 2 → 33.188 run e 551 mail "Run failed"
+  # in mezz'ora. Ora ogni gemello ha il SUO evento e può risvegliare solo l'altro.
   repository_dispatch:
-    types: [guard]
+    types: [guard1]
   workflow_dispatch: {}
+# Cintura strutturale: anche se la logica tornasse a sbagliare, GitHub tiene al massimo
+# 1 run in corso + 1 in attesa per gruppo e scarta il resto. La valanga non può ripartire.
+concurrency:
+  group: recensioni-guardiano-1
+  cancel-in-progress: false
 jobs:
   guard:
     runs-on: ubuntu-latest

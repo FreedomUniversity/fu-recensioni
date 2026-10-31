@@ -3,9 +3,14 @@ name: Recensioni guardiano 2
 on:
   schedule:
     - cron: '22,52 * * * *'
+  # 30/10/2026 — vedi guardiano1.yml: 'guard' li triggerava entrambi, il risveglio
+  # si moltiplicava per 2 a ogni giro. Un evento per gemello.
   repository_dispatch:
-    types: [guard]
+    types: [guard2]
   workflow_dispatch: {}
+concurrency:
+  group: recensioni-guardiano-2
+  cancel-in-progress: false
 jobs:
   guard:
     runs-on: ubuntu-latest
