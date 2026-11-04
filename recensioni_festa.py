@@ -45,7 +45,25 @@ def build(reviewer, stars, collab, text="", url=None, show_collab=True):
     ]
     return f"🎉 NEW RECENSIONE TRUSTPILOT — {reviewer} {int(stars)}★", blocks
 
+# ── FRENO SUL CANALE (5/11/2026) ──────────────────────────────────────────────
+# Domenico: «stoppale» — in #general non esce PIU' NIENTE in automatico, ne' la
+# classifica ne' la festa per la singola recensione.
+# Il freno sta in _send(), l'ultimo collo di bottiglia prima della rete: lo
+# attraversano sia post() (detector, drip, lancio a mano) sia schedule(), e quella
+# e' la strada pericolosa — chat.scheduleMessage DEPOSITA in Slack un messaggio che
+# parte da solo giorni dopo, quando il codice che l'ha creato e' gia' spento.
+# Per riaccendere: REC_GENERAL_ON=1
+GENERAL_OFF_DAL = "05/11/2026"
+
+def _canale_muto(channel):
+    return channel == GENERAL and os.environ.get("REC_GENERAL_ON") != "1"
+
+
 def _send(payload):
+    if _canale_muto(payload.get("channel")):
+        print(f"⛔ #general MUTO dal {GENERAL_OFF_DAL} — nessun invio "
+              f"({payload.get('_url','').rsplit('/', 1)[-1]})")
+        return {"ok": False, "error": "general_muto"}
     req = urllib.request.Request(payload.pop("_url"),
         data=json.dumps(payload).encode(),
         headers={"Authorization":f"Bearer {TOKEN}","Content-Type":"application/json; charset=utf-8"})

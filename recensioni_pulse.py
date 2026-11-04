@@ -15,9 +15,12 @@ DM_DOM  = "U0A4ET9U56E"
 # basta: pulse.yml ha workflow_dispatch, il fallback sul Mac ha la sua lista di
 # script e chiunque puo' lanciare `recensioni_pulse.py C0A4YSS19TP` a mano. Il
 # divieto sta QUI, dove avviene l'invio, cosi' nessuna delle tre strade lo aggira.
-# Per riaccendere: PULSE_GENERAL_ON=1 nell'ambiente.
+# 5/11/2026 — chiave unificata con festa e milestone (`REC_GENERAL_ON`): il canale si
+# riapre con UN interruttore solo. Tre nomi diversi avrebbero significato riaccendere
+# un terzo di canale credendo di averlo riacceso tutto.
+# Per riaccendere: REC_GENERAL_ON=1 nell'ambiente.
 def _vietato(channel):
-    return channel == GENERAL and os.environ.get("PULSE_GENERAL_ON") != "1"
+    return channel == GENERAL and os.environ.get("REC_GENERAL_ON") != "1"
 
 def spinta(tot, target, ranking):
     manca = target - tot

@@ -62,6 +62,13 @@ def _build(n):
     return fb, blocks
 
 def _send(channel, fb, blocks):
+    # FRENO SUL CANALE (5/11/2026) — gemello di quello in festa/pulse, stessa chiave.
+    # Oggi nessun workflow chiama questo file, ma «non e' agganciato» non e' «non puo'
+    # partire»: resta importabile, lanciabile a mano e `approve` pubblica su #general.
+    # Il DM a Domenico non e' toccato: passa solo il canale pubblico.
+    if channel == GENERAL and os.environ.get("REC_GENERAL_ON") != "1":
+        print("⛔ #general MUTO dal 05/11/2026 — milestone non inviata")
+        return False
     token = rcfg.secret("SLACK_FU_TOKEN", "~/.config/slack-fu-token")
     body = {"channel": channel, "text": fb, "blocks": blocks}
     req = urllib.request.Request("https://slack.com/api/chat.postMessage", data=json.dumps(body).encode(),
