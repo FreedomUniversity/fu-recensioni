@@ -50,9 +50,11 @@ jobs:
           # vendor che non usiamo e' solo un modo per farlo ripartire per sbaglio.
           # ghl_won_source.py RIMOSSO dal giro il 19/10/2026: pescava da solo i "Vinto"
           # da GHL e mandava 8 inviti/giorno non richiesti. Gli inviti passano dal Tally.
-          # classifica settimanale: non dipende piu' dal cron GitHub (inaffidabile,
-          # ha saltato lun 20/7). Esce solo lunedi' >=09:00 Rome, una volta a settimana.
-          python3 recensioni_pulse.py --auto
+          # classifica settimanale SPENTA il 5/11/2026 su richiesta di Domenico: il
+          # messaggio «CLASSIFICA RECENSIONI» non esce piu' in #general. Spento anche
+          # il workflow pulse.yml (disabled_manually): erano DUE sorgenti, e il 2/11
+          # hanno sparato tutte e due (9:06 dal tick, 17:56 dal cron GitHub in ritardo).
+          # python3 recensioni_pulse.py --auto
           # digest salute giornaliero: idem, agganciato al tick (1 volta/giorno, mattina Rome)
           python3 recensioni_health.py --auto
       - name: salva stato (repo privato)

@@ -10,6 +10,15 @@ TOKEN   = rcfg.secret("SLACK_FU_TOKEN", "~/.config/slack-fu-token")
 GENERAL = "C0A4YSS19TP"
 DM_DOM  = "U0A4ET9U56E"
 
+# ── FRENO SUL CANALE (5/11/2026) ──────────────────────────────────────────────
+# Domenico ha chiesto di fermare la classifica in #general. Spegnere il cron non
+# basta: pulse.yml ha workflow_dispatch, il fallback sul Mac ha la sua lista di
+# script e chiunque puo' lanciare `recensioni_pulse.py C0A4YSS19TP` a mano. Il
+# divieto sta QUI, dove avviene l'invio, cosi' nessuna delle tre strade lo aggira.
+# Per riaccendere: PULSE_GENERAL_ON=1 nell'ambiente.
+def _vietato(channel):
+    return channel == GENERAL and os.environ.get("PULSE_GENERAL_ON") != "1"
+
 def spinta(tot, target, ranking):
     manca = target - tot
     if tot == 0:
@@ -25,6 +34,9 @@ def spinta(tot, target, ranking):
     return f"*{leader}* è in testa con *{n}*. Chi rimonta? Mancano *{manca}* recensioni al montepremi."
 
 def post(channel):
+    if _vietato(channel):
+        print("⛔ classifica in #general SPENTA (5/11/2026) — nessun invio")
+        return False
     m, c = cls.leaderboard()
     ranking = [(n,k) for n,k in c.most_common() if n and n != "—"]
     tot = sum(c.values())
